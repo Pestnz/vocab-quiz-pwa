@@ -267,10 +267,11 @@ export const App: React.FC = () => {
   }, [vocabList, filterLang, filterType, searchQuery]);
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans w-full relative">
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans w-full relative safe-bottom">
       {toast && (
         <div
-          className={`fixed top-14 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl text-xs font-semibold shadow-2xl transition-all animate-in fade-in slide-in-from-top-2 duration-150 flex items-center gap-2 max-w-[90%] ${
+          style={{ top: 'calc(env(safe-area-inset-top, 0px) + 3.25rem)' }}
+          className={`fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl text-xs font-semibold shadow-2xl transition-all animate-in fade-in slide-in-from-top-2 duration-150 flex items-center gap-2 max-w-[90%] ${
             toast.type === 'success'
               ? 'bg-emerald-600 text-white shadow-emerald-950/80 border border-emerald-500'
               : toast.type === 'error'

@@ -38,7 +38,7 @@ export const VocabEditModal: React.FC<VocabEditModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/75 backdrop-blur-xs">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs safe-top safe-bottom">
       <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden text-slate-100">
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
           <span className="font-semibold text-sm text-slate-100">単語の編集</span>

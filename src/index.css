@@ -13,8 +13,26 @@ body {
   background-color: #0f172a;
   color: #f1f5f9;
   min-height: 100vh;
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* iOS Safe Area (ノッチ・Dynamic Island・時計・ホームバー) 対策 */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-left {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+.safe-right {
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* スクロールバーのコンパクト化（画面分割対応） */

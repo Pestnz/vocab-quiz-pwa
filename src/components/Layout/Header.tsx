@@ -25,7 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   totalCount,
 }) => {
   return (
-    <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 shadow-xs">
+    <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 shadow-xs safe-top">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 flex items-center justify-between">
         {/* ロゴ & タイトル */}
         <div className="flex items-center gap-2.5">
