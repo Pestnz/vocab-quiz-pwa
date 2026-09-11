@@ -249,6 +249,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </p>
             </div>
 
+            <div>
+              <label className="block font-medium text-slate-300 mb-1">
+                Auto時のデフォルト言語（日本語入力時など）
+              </label>
+              <select
+                value={form.defaultLanguage || 'en'}
+                onChange={e => handleChange('defaultLanguage', e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 focus:outline-hidden focus:border-emerald-500 cursor-pointer"
+              >
+                <option value="en">英語 (EN) を優先翻訳</option>
+                <option value="pt">ポルトガル語 (PT) を優先翻訳</option>
+              </select>
+              <p className="text-[10px] text-slate-400 mt-1">
+                ※ 日本語の単語・メモを入力欄（Auto）で追加した際、どちらの言語として登録するかを指定します
+              </p>
+            </div>
+
             {/* Gemini 接続テスト */}
             <div className="pt-1">
               <button

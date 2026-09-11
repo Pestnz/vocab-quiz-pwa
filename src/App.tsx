@@ -164,6 +164,7 @@ export const App: React.FC = () => {
         rawLines,
         settings.geminiApiKey,
         preferredLang,
+        settings.defaultLanguage || 'en',
         (current, total) => {
           setAddingProgressText(`${current} / ${total} 件 解析中...`);
         }

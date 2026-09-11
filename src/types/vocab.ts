@@ -44,6 +44,7 @@ export interface AppSettings {
   branch: string;
   filePath: string;
   geminiApiKey: string;
+  defaultLanguage?: Language;
 }
 
 export type FilterLanguage = 'all' | Language;

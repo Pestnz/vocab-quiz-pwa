@@ -12,9 +12,10 @@ const BATCH_CHUNK_SIZE = 15; // 1回あたりの最大安全チャンク数
 export async function analyzeVocabulary(
   sourceText: string,
   apiKey: string,
-  preferredLanguage: 'auto' | 'en' | 'pt' = 'auto'
+  preferredLanguage: 'auto' | 'en' | 'pt' = 'auto',
+  defaultLanguage: 'en' | 'pt' = 'en'
 ): Promise<VocabAnalysisResult> {
-  const results = await analyzeVocabularyBatch([sourceText], apiKey, preferredLanguage);
+  const results = await analyzeVocabularyBatch([sourceText], apiKey, preferredLanguage, defaultLanguage);
   if (!results || results.length === 0) {
     throw new Error('解析結果が得られませんでした。');
   }
@@ -29,6 +30,7 @@ export async function analyzeVocabularyBatch(
   sourceTexts: string[],
   apiKey: string,
   preferredLanguage: 'auto' | 'en' | 'pt' = 'auto',
+  defaultLanguage: 'en' | 'pt' = 'en',
   onProgress?: (processed: number, total: number) => void
 ): Promise<VocabAnalysisResult[]> {
   if (!apiKey.trim()) {
@@ -46,7 +48,7 @@ export async function analyzeVocabularyBatch(
   // 15個ずつチャンクに分割して順次処理
   for (let i = 0; i < validItems.length; i += BATCH_CHUNK_SIZE) {
     const chunk = validItems.slice(i, i + BATCH_CHUNK_SIZE);
-    const chunkResults = await processBatchChunk(chunk, apiKey, preferredLanguage);
+    const chunkResults = await processBatchChunk(chunk, apiKey, preferredLanguage, defaultLanguage);
     allResults.push(...chunkResults);
 
     if (onProgress) {
@@ -63,11 +65,16 @@ export async function analyzeVocabularyBatch(
 async function processBatchChunk(
   items: string[],
   apiKey: string,
-  preferredLanguage: 'auto' | 'en' | 'pt'
+  preferredLanguage: 'auto' | 'en' | 'pt',
+  defaultLanguage: 'en' | 'pt' = 'en'
 ): Promise<VocabAnalysisResult[]> {
   const systemInstruction = `You are a bilingual vocabulary assistant for English and Portuguese.
 Analyze each of the provided inputs. The inputs can be English terms/phrases, Portuguese terms/phrases, or Japanese expressions.
-${preferredLanguage !== 'auto' ? `User preferred target language: '${preferredLanguage}'.` : ''}
+${
+  preferredLanguage !== 'auto'
+    ? `User explicitly requested target language: '${preferredLanguage}'.`
+    : `The user selected 'auto' language mode. IMPORTANT: If the input is in Japanese or cannot be determined, you MUST translate it into the user's default language: '${defaultLanguage}'. If the input is already in English, output 'en'. If already in Portuguese, output 'pt'.`
+}
 
 Rules for EACH item:
 1. "language": Detect target language. Must be strictly 'en' for English or 'pt' for Portuguese.

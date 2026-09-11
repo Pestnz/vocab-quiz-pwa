@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   branch: 'main',
   filePath: 'vocab.json',
   geminiApiKey: '',
+  defaultLanguage: 'en',
 };
 
 export const getStoredSettings = (): AppSettings => {
