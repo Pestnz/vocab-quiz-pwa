@@ -2,10 +2,16 @@ import React from 'react';
 import { BookOpen, SearchX } from 'lucide-react';
 import type { VocabItem } from '../../types/vocab';
 import { VocabItemCard } from './VocabItemCard';
+import { Pagination } from './Pagination';
 
 interface VocabListProps {
   items: VocabItem[];
-  totalCount: number;
+  totalFilteredCount: number;
+  totalDatabaseCount: number;
+  currentPage: number;
+  totalPages: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
   onEdit: (item: VocabItem) => void;
   onDelete: (id: string) => void;
   onOpenSettings: () => void;
@@ -13,11 +19,16 @@ interface VocabListProps {
 
 export const VocabList: React.FC<VocabListProps> = ({
   items,
-  totalCount,
+  totalFilteredCount,
+  totalDatabaseCount,
+  currentPage,
+  totalPages,
+  pageSize,
+  onPageChange,
   onEdit,
   onDelete,
 }) => {
-  if (totalCount === 0) {
+  if (totalDatabaseCount === 0) {
     return (
       <div className="flex flex-col items-center justify-center p-8 sm:p-12 text-center text-slate-400 space-y-3">
         <div className="w-14 h-14 rounded-full bg-slate-800/80 flex items-center justify-center text-slate-300 shadow-inner">
@@ -33,7 +44,7 @@ export const VocabList: React.FC<VocabListProps> = ({
     );
   }
 
-  if (items.length === 0) {
+  if (totalFilteredCount === 0) {
     return (
       <div className="flex flex-col items-center justify-center p-8 sm:p-12 text-center text-slate-400 space-y-2">
         <SearchX className="w-8 h-8 text-slate-400" />
@@ -46,8 +57,12 @@ export const VocabList: React.FC<VocabListProps> = ({
   return (
     <div className="p-3 sm:p-4 space-y-3">
       <div className="text-[11px] text-slate-400 px-1 flex justify-between items-center">
-        <span>表示中: <span className="text-slate-200 font-medium">{items.length}</span> 件</span>
+        <span>全 <span className="text-slate-200 font-bold">{totalFilteredCount}</span> 件中、{items.length} 件を表示</span>
+        {totalPages > 1 && (
+          <span className="font-mono text-[10px] text-slate-400">{currentPage} / {totalPages} ページ</span>
+        )}
       </div>
+
       {/* スマホは1カラム、タブレット・PCでは2〜3カラムのレスポンシブグリッド */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-start">
         {items.map(item => (
@@ -59,6 +74,15 @@ export const VocabList: React.FC<VocabListProps> = ({
           />
         ))}
       </div>
+
+      {/* ページネーション */}
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={totalFilteredCount}
+        pageSize={pageSize}
+        onPageChange={onPageChange}
+      />
     </div>
   );
 };

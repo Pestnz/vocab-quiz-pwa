@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { BrainCircuit, Clock } from 'lucide-react';
 import { Header } from './components/Layout/Header';
+import { BottomNav } from './components/Layout/BottomNav';
 import { QuickAddBar } from './components/Vocab/QuickAddBar';
 import { VocabFilter } from './components/Vocab/VocabFilter';
 import { VocabList } from './components/Vocab/VocabList';
@@ -14,6 +15,7 @@ import type {
   SyncStatusState,
   FilterLanguage,
   FilterType,
+  SortOption,
 } from './types/vocab';
 import {
   getStoredSettings,
@@ -23,6 +25,8 @@ import {
 } from './services/storage';
 import { githubSyncService } from './services/githubSync';
 import { analyzeVocabularyBatch } from './services/gemini';
+
+const PAGE_SIZE = 20;
 
 export const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(getStoredSettings);
@@ -44,10 +48,16 @@ export const App: React.FC = () => {
 
   const [editingItem, setEditingItem] = useState<VocabItem | null>(null);
 
+  // フィルター・ソート
   const [filterLang, setFilterLang] = useState<FilterLanguage>('all');
   const [filterType, setFilterType] = useState<FilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortOption, setSortOption] = useState<SortOption>('created_desc');
 
+  // ページネーション
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // トースト通知
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null);
 
   const showToast = useCallback((message: string, type: 'info' | 'success' | 'error' = 'info') => {
@@ -97,7 +107,6 @@ export const App: React.FC = () => {
   useEffect(() => {
     const handleFocus = () => {
       if (settings.githubToken && settings.repoOwner && settings.repoName) {
-        console.log('Window focused: re-syncing with GitHub...');
         syncWithRemote(settings, false);
       }
     };
@@ -131,6 +140,11 @@ export const App: React.FC = () => {
     }
   }, [settings, showToast]);
 
+  // フィルター・ソート変更時にページを1に戻す
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterLang, filterType, searchQuery, sortOption]);
+
   // 単語の追加（単一または一括）
   const handleAddVocab = async (sourceText: string, preferredLang: 'auto' | 'en' | 'pt') => {
     if (!settings.geminiApiKey) {
@@ -139,7 +153,6 @@ export const App: React.FC = () => {
       return;
     }
 
-    // 改行で分割して有効な単語リストを抽出
     const rawLines = sourceText.split('\n').map(s => s.trim()).filter(Boolean);
     if (rawLines.length === 0) return;
 
@@ -147,7 +160,6 @@ export const App: React.FC = () => {
     setAddingProgressText(rawLines.length > 1 ? `0 / ${rawLines.length} 件 解析中...` : 'AI解析中...');
 
     try {
-      // 1. Gemini API 一括解析（複数件でも自動チャンク処理）
       const analysisList = await analyzeVocabularyBatch(
         rawLines,
         settings.geminiApiKey,
@@ -157,7 +169,6 @@ export const App: React.FC = () => {
         }
       );
 
-      // 2. VocabItem リストを生成
       const now = new Date().toISOString();
       const newItems: VocabItem[] = analysisList.map((analysis, idx) => ({
         id: typeof crypto !== 'undefined' && crypto.randomUUID
@@ -177,7 +188,6 @@ export const App: React.FC = () => {
         updatedAt: now,
       }));
 
-      // 3. 楽観的UI更新（先頭に追加）
       const nextList = [...newItems, ...vocabList];
       setVocabList(nextList);
       setCachedVocab(nextList);
@@ -188,7 +198,6 @@ export const App: React.FC = () => {
         showToast(`${newItems.length}件の単語を一括追加しました`, 'success');
       }
 
-      // 4. GitHubへ一括コミットプッシュ（1回のみ実行）
       const commitMsg = newItems.length === 1
         ? `feat(vocab): add "${newItems[0].term}"`
         : `feat(vocab): batch add ${newItems.length} items`;
@@ -242,6 +251,7 @@ export const App: React.FC = () => {
     }
   };
 
+  // 復習予定の単語数
   const dueCount = useMemo(() => {
     const now = Date.now();
     return vocabList.filter(item => {
@@ -250,8 +260,9 @@ export const App: React.FC = () => {
     }).length;
   }, [vocabList]);
 
-  const filteredVocab = useMemo(() => {
-    return vocabList.filter(item => {
+  // フィルタリング ＆ ソート
+  const filteredAndSortedVocab = useMemo(() => {
+    const filtered = vocabList.filter(item => {
       if (filterLang !== 'all' && item.language !== filterLang) return false;
       if (filterType !== 'all' && item.type !== filterType) return false;
       if (searchQuery.trim()) {
@@ -264,10 +275,33 @@ export const App: React.FC = () => {
       }
       return true;
     });
-  }, [vocabList, filterLang, filterType, searchQuery]);
+
+    // ソート処理
+    return filtered.sort((a, b) => {
+      switch (sortOption) {
+        case 'created_asc':
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case 'term_asc':
+          return a.term.localeCompare(b.term, undefined, { sensitivity: 'base' });
+        case 'term_desc':
+          return b.term.localeCompare(a.term, undefined, { sensitivity: 'base' });
+        case 'created_desc':
+        default:
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+    });
+  }, [vocabList, filterLang, filterType, searchQuery, sortOption]);
+
+  // ページネーション計算
+  const totalPages = Math.max(1, Math.ceil(filteredAndSortedVocab.length / PAGE_SIZE));
+  const pagedVocab = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredAndSortedVocab.slice(start, start + PAGE_SIZE);
+  }, [filteredAndSortedVocab, currentPage]);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans w-full relative safe-bottom">
+      {/* トースト通知 */}
       {toast && (
         <div
           style={{ top: 'calc(env(safe-area-inset-top, 0px) + 3.25rem)' }}
@@ -283,6 +317,7 @@ export const App: React.FC = () => {
         </div>
       )}
 
+      {/* ヘッダー */}
       <Header
         currentView={currentView}
         onViewChange={setCurrentView}
@@ -294,7 +329,8 @@ export const App: React.FC = () => {
         totalCount={vocabList.length}
       />
 
-      <main className="flex-1 w-full max-w-7xl mx-auto flex flex-col min-h-0">
+      {/* メインビュー */}
+      <main className="flex-1 w-full max-w-7xl mx-auto flex flex-col min-h-0 pb-16 md:pb-6">
         {currentView === 'list' ? (
           <>
             {/* モバイル / 画面分割時 (< md: 768px): 1カラム */}
@@ -314,12 +350,19 @@ export const App: React.FC = () => {
                 onTypeChange={setFilterType}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
+                sort={sortOption}
+                onSortChange={setSortOption}
               />
 
               <div className="flex-1">
                 <VocabList
-                  items={filteredVocab}
-                  totalCount={vocabList.length}
+                  items={pagedVocab}
+                  totalFilteredCount={filteredAndSortedVocab.length}
+                  totalDatabaseCount={vocabList.length}
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  pageSize={PAGE_SIZE}
+                  onPageChange={setCurrentPage}
                   onEdit={setEditingItem}
                   onDelete={handleDeleteItem}
                   onOpenSettings={() => setIsSettingsOpen(true)}
@@ -345,6 +388,8 @@ export const App: React.FC = () => {
                   onTypeChange={setFilterType}
                   searchQuery={searchQuery}
                   onSearchChange={setSearchQuery}
+                  sort={sortOption}
+                  onSortChange={setSortOption}
                 />
 
                 <div className="bg-slate-850 p-4 rounded-xl border border-slate-800 space-y-3 shadow-md">
@@ -380,8 +425,13 @@ export const App: React.FC = () => {
 
               <div className="flex-1 min-w-0 bg-slate-850/40 rounded-2xl border border-slate-800/80 p-2 sm:p-4 min-h-[500px]">
                 <VocabList
-                  items={filteredVocab}
-                  totalCount={vocabList.length}
+                  items={pagedVocab}
+                  totalFilteredCount={filteredAndSortedVocab.length}
+                  totalDatabaseCount={vocabList.length}
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  pageSize={PAGE_SIZE}
+                  onPageChange={setCurrentPage}
                   onEdit={setEditingItem}
                   onDelete={handleDeleteItem}
                   onOpenSettings={() => setIsSettingsOpen(true)}
@@ -398,6 +448,14 @@ export const App: React.FC = () => {
         )}
       </main>
 
+      {/* スマホ専用ボトムタブバー */}
+      <BottomNav
+        currentView={currentView}
+        onViewChange={setCurrentView}
+        dueCount={dueCount}
+      />
+
+      {/* 設定モーダル */}
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
@@ -405,6 +463,7 @@ export const App: React.FC = () => {
         onSave={handleSaveSettings}
       />
 
+      {/* 編集モーダル */}
       <VocabEditModal
         isOpen={Boolean(editingItem)}
         item={editingItem}

@@ -48,3 +48,6 @@ export interface AppSettings {
 
 export type FilterLanguage = 'all' | Language;
 export type FilterType = 'all' | VocabType;
+
+// 並び替えオプション
+export type SortOption = 'created_desc' | 'created_asc' | 'term_asc' | 'term_desc';
