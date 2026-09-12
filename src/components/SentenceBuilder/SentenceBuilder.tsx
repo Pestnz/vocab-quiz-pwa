@@ -80,7 +80,10 @@ export const SentenceBuilder: React.FC<SentenceBuilderProps> = ({
     return hasItemsInLang ? 'my_vocab' : 'ai_random';
   });
 
-  // AIおまかせ時の難易度レベル
+  // AIモードで既に生成済みか（未生成時は設定・レベル選択画面をまず表示）
+  const [aiHasDrawn, setAiHasDrawn] = useState(false);
+
+  // AIおまかせ出題の難易度レベル
   const [difficultyLevel, setDifficultyLevel] = useState<VocabDifficultyLevel>('intermediate');
 
   // AI単語生成ローディング中
@@ -160,6 +163,7 @@ export const SentenceBuilder: React.FC<SentenceBuilderProps> = ({
             apiKey,
           });
           setCurrentWords(aiWords);
+          setAiHasDrawn(true);
         } catch (err: unknown) {
           const e = err as Error;
           setErrorMessage(e.message || 'AIによる単語生成に失敗しました。');
@@ -171,39 +175,58 @@ export const SentenceBuilder: React.FC<SentenceBuilderProps> = ({
     [wordCount, selectedLanguage, sourceMode, difficultyLevel, vocabList, recentPassedIds, apiKey, onOpenSettings]
   );
 
-  // 初回起動時およびモード・言語・レベル変更時の初期抽選
+  // 初回起動時の初期抽選（マイ単語帳モードの場合のみ自動実行）
   useEffect(() => {
     if (currentWords.length === 0) {
-      if (sourceMode === 'my_vocab' && totalInLang === 0) {
-        // 単語帳に単語がない場合は描画のみ（メッセージ表示）
-        return;
+      if (sourceMode === 'my_vocab' && totalInLang > 0) {
+        drawWords(wordCount, selectedLanguage, 'my_vocab', difficultyLevel);
       }
-      drawWords(wordCount, selectedLanguage, sourceMode, difficultyLevel);
     }
   }, [sourceMode, selectedLanguage, totalInLang, wordCount, difficultyLevel, drawWords, currentWords.length]);
 
   // 言語切り替え
   const handleLanguageChange = (lang: Language) => {
     setSelectedLanguage(lang);
-    drawWords(wordCount, lang, sourceMode, difficultyLevel);
+    if (sourceMode === 'my_vocab') {
+      drawWords(wordCount, lang, 'my_vocab', difficultyLevel);
+    }
   };
 
-  // モード切り替え
+  // モード切り替え（AIモード切り替え時は自動生成せず、まずレベル選択画面を表示）
   const handleModeChange = (mode: SentenceSourceMode) => {
     setSourceMode(mode);
-    drawWords(wordCount, selectedLanguage, mode, difficultyLevel);
+    setResult(null);
+    setErrorMessage(null);
+    setUserSentence('');
+    if (mode === 'my_vocab') {
+      if (totalInLang > 0) {
+        drawWords(wordCount, selectedLanguage, 'my_vocab', difficultyLevel);
+      } else {
+        setCurrentWords([]);
+      }
+    } else {
+      setAiHasDrawn(false);
+      setCurrentWords([]);
+    }
   };
 
-  // 難易度切り替え
+  // 難易度レベル選択（選択状態のみ更新し、勝手にAPIは呼ばない）
   const handleLevelChange = (level: VocabDifficultyLevel) => {
     setDifficultyLevel(level);
-    drawWords(wordCount, selectedLanguage, sourceMode, level);
+  };
+
+  // AI単語生成を明示的に開始
+  const handleStartAiGeneration = (level = difficultyLevel) => {
+    setAiHasDrawn(true);
+    drawWords(wordCount, selectedLanguage, 'ai_random', level);
   };
 
   // 単語数変更
   const handleWordCountChange = (count: number) => {
     setWordCount(count);
-    drawWords(count, selectedLanguage, sourceMode, difficultyLevel);
+    if (sourceMode === 'my_vocab') {
+      drawWords(count, selectedLanguage, 'my_vocab', difficultyLevel);
+    }
   };
 
   // 単語詳細開閉トグル
@@ -481,34 +504,51 @@ export const SentenceBuilder: React.FC<SentenceBuilderProps> = ({
               </div>
             </div>
 
-            {/* 2行目: AIおまかせモード時の難易度レベル選択 */}
-            {sourceMode === 'ai_random' && (
+            {/* 2行目: AIおまかせモード時の難易度レベル選択（出題中） */}
+            {sourceMode === 'ai_random' && aiHasDrawn && (
               <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2 flex-wrap text-xs">
                 <div className="flex items-center gap-1.5 text-slate-300 font-semibold text-[11px]">
                   <GraduationCap className="w-3.5 h-3.5 text-indigo-400" />
                   <span>単語レベル:</span>
                 </div>
-                <div className="flex bg-slate-900 p-0.5 rounded-lg border border-slate-750 text-[11px] flex-wrap gap-0.5">
-                  {[
-                    { key: 'beginner', label: '初級 (A1-A2)', tip: '基礎・日常会話（英検3〜準2級 / TOEIC ~500）' },
-                    { key: 'intermediate', label: '中級 (B1)', tip: '実用・ビジネス基礎（英検2級 / TOEIC 500-700）' },
-                    { key: 'upper_intermediate', label: '中上級 (B2)', tip: '表現力・実践（英検準1級 / TOEIC 700-850）' },
-                    { key: 'advanced', label: '上級 (C1-C2)', tip: 'ニュース・高度な議論（英検1級 / TOEIC 860+）' },
-                  ].map(lvl => (
-                    <button
-                      key={lvl.key}
-                      onClick={() => handleLevelChange(lvl.key as VocabDifficultyLevel)}
-                      title={lvl.tip}
-                      disabled={isGeneratingWords}
-                      className={`px-2 py-1 rounded-md transition-all cursor-pointer font-medium ${
-                        difficultyLevel === lvl.key
-                          ? 'bg-indigo-600 text-white font-bold shadow-xs'
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      {lvl.label}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <div className="flex bg-slate-900 p-0.5 rounded-lg border border-slate-750 text-[11px] flex-wrap gap-0.5">
+                    {[
+                      { key: 'beginner', label: '初級 (A1-A2)', tip: '基礎・日常会話（英検3〜準2級 / TOEIC ~500）' },
+                      { key: 'intermediate', label: '中級 (B1)', tip: '実用・ビジネス基礎（英検2級 / TOEIC 500-700）' },
+                      { key: 'upper_intermediate', label: '中上級 (B2)', tip: '表現力・実践（英検準1級 / TOEIC 700-850）' },
+                      { key: 'advanced', label: '上級 (C1-C2)', tip: 'ニュース・高度な議論（英検1級 / TOEIC 860+）' },
+                    ].map(lvl => (
+                      <button
+                        key={lvl.key}
+                        onClick={() => {
+                          handleLevelChange(lvl.key as VocabDifficultyLevel);
+                          // レベル変更時はそのレベルで再生成
+                          handleStartAiGeneration(lvl.key as VocabDifficultyLevel);
+                        }}
+                        title={lvl.tip}
+                        disabled={isGeneratingWords}
+                        className={`px-2 py-1 rounded-md transition-all cursor-pointer font-medium ${
+                          difficultyLevel === lvl.key
+                            ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {lvl.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAiHasDrawn(false);
+                      setCurrentWords([]);
+                    }}
+                    className="text-[10px] text-slate-400 hover:text-indigo-300 underline underline-offset-2 ml-1"
+                  >
+                    設定画面へ戻る
+                  </button>
                 </div>
               </div>
             )}
@@ -541,6 +581,95 @@ export const SentenceBuilder: React.FC<SentenceBuilderProps> = ({
                 <div className="text-sm font-bold text-slate-200">AIが指定レベルの単語を選定中...</div>
                 <div className="text-xs text-slate-400">実用的な語彙をランダム抽出しています</div>
               </div>
+            </div>
+          ) : sourceMode === 'ai_random' && !aiHasDrawn ? (
+            /* AI単語生成前のレベル選択＆開始画面 */
+            <div className="bg-slate-850/90 rounded-2xl border border-slate-800 p-5 sm:p-6 shadow-xl space-y-5 animate-in fade-in duration-150">
+              <div className="text-center space-y-1.5">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto mb-2 shadow-inner">
+                  <Sparkles className="w-6 h-6" />
+                </div>
+                <h2 className="text-base sm:text-lg font-bold text-slate-100">
+                  AIおまかせ出題（難易度レベル選択）
+                </h2>
+                <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+                  挑戦したい単語レベルを選択してください。Geminiが実用的で自然な単語をランダム抽出し、強制作文チャレンジを出題します。
+                </p>
+              </div>
+
+              {/* レベル選択カードグリッド */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                {[
+                  {
+                    key: 'beginner',
+                    title: '初級 (A1-A2)',
+                    desc: '基礎・日常会話語彙',
+                    detail: '目安: 英検3〜準2級 / TOEIC 〜500',
+                    color: 'from-emerald-600/20 to-teal-600/10 border-emerald-500/50',
+                  },
+                  {
+                    key: 'intermediate',
+                    title: '中級 (B1)',
+                    desc: '実用・ビジネス基礎語彙',
+                    detail: '目安: 英検2級 / TOEIC 500〜700',
+                    color: 'from-blue-600/20 to-indigo-600/10 border-blue-500/50',
+                  },
+                  {
+                    key: 'upper_intermediate',
+                    title: '中上級 (B2)',
+                    desc: '表現力向上・実践的な語彙',
+                    detail: '目安: 英検準1級 / TOEIC 700〜850',
+                    color: 'from-indigo-600/20 to-purple-600/10 border-indigo-500/50',
+                  },
+                  {
+                    key: 'advanced',
+                    title: '上級 (C1-C2)',
+                    desc: 'ニュース・高度な議論・成句',
+                    detail: '目安: 英検1級 / TOEIC 860+',
+                    color: 'from-purple-600/20 to-rose-600/10 border-purple-500/50',
+                  },
+                ].map(lvl => {
+                  const isSelected = difficultyLevel === lvl.key;
+                  return (
+                    <div
+                      key={lvl.key}
+                      onClick={() => handleLevelChange(lvl.key as VocabDifficultyLevel)}
+                      className={`p-3.5 rounded-xl border transition-all cursor-pointer select-none flex flex-col justify-between gap-1.5 ${
+                        isSelected
+                          ? `bg-gradient-to-br ${lvl.color} ring-2 ring-indigo-500 shadow-md`
+                          : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-sm text-slate-100">{lvl.title}</span>
+                        {isSelected && (
+                          <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold">
+                            ✓
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-300 font-medium">{lvl.desc}</div>
+                      <div className="text-[10px] text-slate-400 font-mono">{lvl.detail}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 生成開始ボタン */}
+              <button
+                type="button"
+                onClick={() => handleStartAiGeneration()}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-950 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>
+                  {difficultyLevel === 'beginner' && '初級 (A1-A2)'}
+                  {difficultyLevel === 'intermediate' && '中級 (B1)'}
+                  {difficultyLevel === 'upper_intermediate' && '中上級 (B2)'}
+                  {difficultyLevel === 'advanced' && '上級 (C1-C2)'}
+                  {' の単語を生成してスタート（' + wordCount + '語）'}
+                </span>
+              </button>
             </div>
           ) : (
             /* 出題カードコンテナ */
