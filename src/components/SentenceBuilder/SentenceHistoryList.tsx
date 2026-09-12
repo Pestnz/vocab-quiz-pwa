@@ -218,7 +218,7 @@ export const SentenceHistoryList: React.FC<SentenceHistoryListProps> = ({
       <div className="space-y-3">
         {filteredHistory.map(log => {
           const isPass = log.result.isPass;
-          const isExpanded = expandedIds[log.id] ?? true; // デフォルト展開
+          const isExpanded = expandedIds[log.id] ?? false; // デフォルトは折りたたみ（閉じた状態）
 
           return (
             <div
@@ -229,8 +229,11 @@ export const SentenceHistoryList: React.FC<SentenceHistoryListProps> = ({
                   : 'border-slate-800 hover:border-amber-500/40'
               }`}
             >
-              {/* カード上部情報 */}
-              <div className="flex items-center justify-between gap-2 flex-wrap">
+              {/* カード上部情報（ヘッダー全体をクリックで開閉可能） */}
+              <div
+                onClick={() => toggleExpand(log.id)}
+                className="flex items-center justify-between gap-2 flex-wrap cursor-pointer select-none"
+              >
                 <div className="flex items-center gap-2">
                   {/* 言語ラベル */}
                   <span
@@ -270,7 +273,10 @@ export const SentenceHistoryList: React.FC<SentenceHistoryListProps> = ({
 
                   {/* アコーディオン開閉ボタン */}
                   <button
-                    onClick={() => toggleExpand(log.id)}
+                    onClick={e => {
+                      e.stopPropagation();
+                      toggleExpand(log.id);
+                    }}
                     className="p-1 rounded text-slate-400 hover:text-slate-200 transition-colors"
                     title={isExpanded ? '折りたたむ' : '詳細を展開'}
                   >
@@ -279,7 +285,8 @@ export const SentenceHistoryList: React.FC<SentenceHistoryListProps> = ({
 
                   {/* 削除ボタン */}
                   <button
-                    onClick={() => {
+                    onClick={e => {
+                      e.stopPropagation();
                       if (window.confirm('この作文履歴を削除しますか？')) {
                         onDeleteLog(log.id);
                       }

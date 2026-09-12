@@ -379,6 +379,37 @@ export const App: React.FC = () => {
     showToast('作文履歴を削除しました', 'info');
   }, [pushSentenceHistoryToRemote, showToast]);
 
+  // 瞬間作文モード: AI抽出単語を直接単語帳に追加＆GitHub同期
+  const handleAddCustomWord = useCallback(async (newWord: VocabItem) => {
+    // 既に同じ見出し語が存在するか確認
+    const exists = vocabList.some(
+      v => v.term.toLowerCase().trim() === newWord.term.toLowerCase().trim()
+    );
+    if (exists) {
+      showToast(`「${newWord.term}」は既に単語帳に登録されています`, 'info');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const itemToAdd: VocabItem = {
+      ...newWord,
+      id: typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `word-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      createdAt: now,
+      updatedAt: now,
+      nextReviewAt: now,
+      proficiency: 0,
+    };
+
+    const nextList = [itemToAdd, ...vocabList];
+    setVocabList(nextList);
+    setCachedVocab(nextList);
+    showToast(`「${itemToAdd.term}」を単語帳に追加しました`, 'success');
+
+    await pushToRemote(nextList, `feat(vocab): add "${itemToAdd.term}" from AI practice`);
+  }, [vocabList, pushToRemote, showToast]);
+
   const handleSaveSettings = (newSettings: AppSettings) => {
     setSettings(newSettings);
     saveStoredSettings(newSettings);
@@ -602,6 +633,7 @@ export const App: React.FC = () => {
             onSaveExample={handleSaveSentenceExample}
             onSaveLog={handleSaveSentenceLog}
             onDeleteLog={handleDeleteSentenceLog}
+            onAddCustomWord={handleAddCustomWord}
           />
         ) : (
           <FlashcardQuiz

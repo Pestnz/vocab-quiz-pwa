@@ -56,6 +56,16 @@ export type SortOption = 'created_desc' | 'created_asc' | 'term_asc' | 'term_des
 // 画面表示モード
 export type ViewMode = 'list' | 'quiz' | 'sentence';
 
+// 出題ソースモード（マイ単語帳 / AIランダム）
+export type SentenceSourceMode = 'my_vocab' | 'ai_random';
+
+// 単語難易度レベル
+export type VocabDifficultyLevel =
+  | 'beginner'           // 初級 (A1-A2: 基礎・日常)
+  | 'intermediate'       // 中級 (B1: 実用・ビジネス基礎)
+  | 'upper_intermediate' // 中上級 (B2: 表現力向上・実践)
+  | 'advanced';          // 上級 (C1-C2: ニュース・学術・高度)
+
 // 語彙強制使用（縛りプレイ）作文判定結果
 export interface SentenceCheckResult {
   isPass: boolean;                // 文法的に成立しており指定単語をすべて使えているか
@@ -75,4 +85,6 @@ export interface SentencePracticeLog {
   targetTerms: string[];
   userSentence: string;
   result: SentenceCheckResult;
+  sourceMode?: SentenceSourceMode;
+  level?: VocabDifficultyLevel;
 }
