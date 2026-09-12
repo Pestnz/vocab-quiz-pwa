@@ -95,3 +95,62 @@ export const getCachedSentenceHistorySha = (): string | null => {
 export const setCachedSentenceHistorySha = (sha: string): void => {
   localStorage.setItem(LOCAL_SENTENCE_HISTORY_SHA_KEY, sha);
 };
+
+// 削除済み単語IDの追跡（同期時のゾンビ復活防止ガード）
+const DELETED_ITEM_IDS_KEY = 'vocab_deleted_item_ids';
+const DELETED_SENTENCE_LOG_IDS_KEY = 'sentence_deleted_log_ids';
+
+export const getDeletedItemIds = (): string[] => {
+  try {
+    const raw = localStorage.getItem(DELETED_ITEM_IDS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.error('Failed to read deleted item IDs', e);
+    return [];
+  }
+};
+
+export const addDeletedItemId = (id: string): void => {
+  try {
+    const current = getDeletedItemIds();
+    const updated = [id, ...current.filter(existingId => existingId !== id)].slice(0, 200);
+    localStorage.setItem(DELETED_ITEM_IDS_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.error('Failed to save deleted item ID', e);
+  }
+};
+
+export const removeDeletedItemId = (id: string): void => {
+  try {
+    const current = getDeletedItemIds();
+    const updated = current.filter(existingId => existingId !== id);
+    localStorage.setItem(DELETED_ITEM_IDS_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.error('Failed to remove deleted item ID', e);
+  }
+};
+
+export const getDeletedSentenceLogIds = (): string[] => {
+  try {
+    const raw = localStorage.getItem(DELETED_SENTENCE_LOG_IDS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.error('Failed to read deleted sentence log IDs', e);
+    return [];
+  }
+};
+
+export const addDeletedSentenceLogId = (id: string): void => {
+  try {
+    const current = getDeletedSentenceLogIds();
+    const updated = [id, ...current.filter(existingId => existingId !== id)].slice(0, 200);
+    localStorage.setItem(DELETED_SENTENCE_LOG_IDS_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.error('Failed to save deleted sentence log ID', e);
+  }
+};
+

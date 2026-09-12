@@ -6,6 +6,8 @@ import {
   setCachedSentenceHistory,
   getCachedSentenceHistorySha,
   setCachedSentenceHistorySha,
+  getDeletedItemIds,
+  getDeletedSentenceLogIds,
 } from './storage';
 
 export function toBase64Utf8(str: string): string {
@@ -183,16 +185,27 @@ export class GitHubSyncService {
   }
 
   /**
-   * ローカルとリモートのVocabItemをマージする
+   * ローカルとリモートのVocabItemをマージする（削除済みIDは除外してゾンビ復活を防止）
    */
-  public mergeVocabDatabases(local: VocabDatabase, remote: VocabDatabase): VocabDatabase {
+  public mergeVocabDatabases(
+    local: VocabDatabase,
+    remote: VocabDatabase,
+    deletedIds?: Set<string>
+  ): VocabDatabase {
+    const deleted = deletedIds ?? new Set(getDeletedItemIds());
     const map = new Map<string, VocabItem>();
 
     for (const item of remote) {
+      if (deleted.has(item.id)) {
+        continue; // 削除済みIDは復活させない
+      }
       map.set(item.id, item);
     }
 
     for (const localItem of local) {
+      if (deleted.has(localItem.id)) {
+        continue; // 削除済みIDは含めない
+      }
       const existing = map.get(localItem.id);
       if (!existing) {
         map.set(localItem.id, localItem);
@@ -335,19 +348,27 @@ export class GitHubSyncService {
   }
 
   /**
-   * ローカルとリモートの作文履歴をマージする（IDベース）
+   * ローカルとリモートの作文履歴をマージする（IDベース・削除済みIDは除外）
    */
   public mergeSentenceHistory(
     local: SentencePracticeLog[],
-    remote: SentencePracticeLog[]
+    remote: SentencePracticeLog[],
+    deletedIds?: Set<string>
   ): SentencePracticeLog[] {
+    const deleted = deletedIds ?? new Set(getDeletedSentenceLogIds());
     const map = new Map<string, SentencePracticeLog>();
 
     for (const item of remote) {
+      if (deleted.has(item.id)) {
+        continue; // 削除済みログは除外
+      }
       map.set(item.id, item);
     }
 
     for (const localItem of local) {
+      if (deleted.has(localItem.id)) {
+        continue;
+      }
       if (!map.has(localItem.id)) {
         map.set(localItem.id, localItem);
       }

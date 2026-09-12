@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { BrainCircuit, Clock, PenTool } from 'lucide-react';
 import { Header } from './components/Layout/Header';
 import { BottomNav } from './components/Layout/BottomNav';
@@ -27,6 +27,9 @@ import {
   setCachedVocab,
   getCachedSentenceHistory,
   setCachedSentenceHistory,
+  addDeletedItemId,
+  removeDeletedItemId,
+  addDeletedSentenceLogId,
 } from './services/storage';
 import { githubSyncService } from './services/githubSync';
 import { analyzeVocabularyBatch } from './services/gemini';
@@ -53,6 +56,11 @@ export const App: React.FC = () => {
   const [addingProgressText, setAddingProgressText] = useState<string | undefined>(undefined);
 
   const [editingItem, setEditingItem] = useState<VocabItem | null>(null);
+
+  // 非同期プッシュ中フラグ（自動フェッチとの競合・上書き防止用）
+  const isPushingRef = useRef(false);
+  // 直近のデータ変更タイムスタンプ（confirm直後のfocusイベント等による誤同期防止用）
+  const lastMutationTimeRef = useRef(0);
 
   // フィルター・ソート
   const [filterLang, setFilterLang] = useState<FilterLanguage>('all');
@@ -124,6 +132,10 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const handleFocus = () => {
+      // 直近のデータ変更操作（削除・更新）から3.5秒以内、または保存通信中は自動同期をスキップして競合を防ぐ
+      if (Date.now() - lastMutationTimeRef.current < 3500 || isPushingRef.current) {
+        return;
+      }
       if (settings.githubToken && settings.repoOwner && settings.repoName) {
         syncWithRemote(settings, false);
       }
@@ -142,6 +154,9 @@ export const App: React.FC = () => {
       return;
     }
 
+    isPushingRef.current = true;
+    lastMutationTimeRef.current = Date.now();
+
     try {
       setSyncStatus('syncing');
       const res = await githubSyncService.pushVocab(updatedList, settings, commitMessage);
@@ -155,6 +170,8 @@ export const App: React.FC = () => {
       setSyncStatus('error');
       setErrorMessage(err.message);
       showToast(`GitHub保存エラー: ${err.message}`, 'error');
+    } finally {
+      isPushingRef.current = false;
     }
   }, [settings, showToast]);
 
@@ -167,6 +184,9 @@ export const App: React.FC = () => {
       return;
     }
 
+    isPushingRef.current = true;
+    lastMutationTimeRef.current = Date.now();
+
     try {
       const res = await githubSyncService.pushSentenceHistory(updatedHistory, settings, commitMessage);
       setCachedSentenceHistory(updatedHistory, res.sha);
@@ -174,6 +194,8 @@ export const App: React.FC = () => {
       const err = e as Error;
       console.error('Push sentence history failed', err);
       showToast(`作文履歴のGitHub同期エラー: ${err.message}`, 'error');
+    } finally {
+      isPushingRef.current = false;
     }
   }, [settings, showToast]);
 
@@ -226,6 +248,7 @@ export const App: React.FC = () => {
         updatedAt: now,
       }));
 
+      newItems.forEach(item => removeDeletedItemId(item.id));
       const nextList = [...newItems, ...vocabList];
       setVocabList(nextList);
       setCachedVocab(nextList);
@@ -253,6 +276,7 @@ export const App: React.FC = () => {
   };
 
   const handleSaveEdit = (updatedItem: VocabItem) => {
+    lastMutationTimeRef.current = Date.now();
     const nextList = vocabList.map(item => (item.id === updatedItem.id ? updatedItem : item));
     setVocabList(nextList);
     setCachedVocab(nextList);
@@ -261,6 +285,8 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteItem = (id: string) => {
+    lastMutationTimeRef.current = Date.now();
+    addDeletedItemId(id);
     const target = vocabList.find(i => i.id === id);
     const nextList = vocabList.filter(item => item.id !== id);
     setVocabList(nextList);
@@ -370,6 +396,8 @@ export const App: React.FC = () => {
 
   // 瞬間作文モード: 作文履歴の個別削除＆GitHub同期
   const handleDeleteSentenceLog = useCallback((logId: string) => {
+    lastMutationTimeRef.current = Date.now();
+    addDeletedSentenceLogId(logId);
     setSentenceHistory(prev => {
       const nextHistory = prev.filter(l => l.id !== logId);
       setCachedSentenceHistory(nextHistory);
@@ -402,6 +430,7 @@ export const App: React.FC = () => {
       proficiency: 0,
     };
 
+    removeDeletedItemId(itemToAdd.id);
     const nextList = [itemToAdd, ...vocabList];
     setVocabList(nextList);
     setCachedVocab(nextList);
