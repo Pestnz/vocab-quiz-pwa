@@ -33,6 +33,7 @@ import {
 } from './services/storage';
 import { githubSyncService } from './services/githubSync';
 import { analyzeVocabularyBatch } from './services/gemini';
+import { isDuplicateVocab } from './services/vocabUtils';
 
 const PAGE_SIZE = 20;
 
@@ -248,20 +249,52 @@ export const App: React.FC = () => {
         updatedAt: now,
       }));
 
-      newItems.forEach(item => removeDeletedItemId(item.id));
-      const nextList = [...newItems, ...vocabList];
+      // 重複チェック（日英セット照合で多義語・同義語は許容し、完全重複のみ除外）
+      const uniqueNewItems: VocabItem[] = [];
+      const duplicateItems: VocabItem[] = [];
+
+      for (const item of newItems) {
+        const isDup =
+          vocabList.some(existing => isDuplicateVocab(existing, item)) ||
+          uniqueNewItems.some(alreadyAdded => isDuplicateVocab(alreadyAdded, item));
+
+        if (isDup) {
+          duplicateItems.push(item);
+        } else {
+          uniqueNewItems.push(item);
+        }
+      }
+
+      // すべて重複している場合はスキップして通知
+      if (uniqueNewItems.length === 0) {
+        if (newItems.length === 1) {
+          const dup = duplicateItems[0];
+          showToast(`「${dup.term}」（${dup.meaning}）は既に単語帳に登録されています`, 'info');
+        } else {
+          showToast('入力された単語はすべて既に単語帳に登録されています', 'info');
+        }
+        return;
+      }
+
+      uniqueNewItems.forEach(item => removeDeletedItemId(item.id));
+      const nextList = [...uniqueNewItems, ...vocabList];
       setVocabList(nextList);
       setCachedVocab(nextList);
 
       if (newItems.length === 1) {
-        showToast(`「${newItems[0].term}」を追加しました`, 'success');
+        showToast(`「${uniqueNewItems[0].term}」を追加しました`, 'success');
+      } else if (duplicateItems.length > 0) {
+        showToast(
+          `${uniqueNewItems.length}件を追加しました（${duplicateItems.length}件は登録済みのためスキップ）`,
+          'success'
+        );
       } else {
-        showToast(`${newItems.length}件の単語を一括追加しました`, 'success');
+        showToast(`${uniqueNewItems.length}件の単語を一括追加しました`, 'success');
       }
 
-      const commitMsg = newItems.length === 1
-        ? `feat(vocab): add "${newItems[0].term}"`
-        : `feat(vocab): batch add ${newItems.length} items`;
+      const commitMsg = uniqueNewItems.length === 1
+        ? `feat(vocab): add "${uniqueNewItems[0].term}"`
+        : `feat(vocab): batch add ${uniqueNewItems.length} items`;
 
       await pushToRemote(nextList, commitMsg);
     } catch (err: unknown) {
@@ -409,12 +442,10 @@ export const App: React.FC = () => {
 
   // 瞬間作文モード: AI抽出単語を直接単語帳に追加＆GitHub同期
   const handleAddCustomWord = useCallback(async (newWord: VocabItem) => {
-    // 既に同じ見出し語が存在するか確認
-    const exists = vocabList.some(
-      v => v.term.toLowerCase().trim() === newWord.term.toLowerCase().trim()
-    );
+    // 既に完全重複する単語が存在するか確認（多義語・同義語は許容）
+    const exists = vocabList.some(v => isDuplicateVocab(v, newWord));
     if (exists) {
-      showToast(`「${newWord.term}」は既に単語帳に登録されています`, 'info');
+      showToast(`「${newWord.term}」（${newWord.meaning}）は既に単語帳に登録されています`, 'info');
       return;
     }
 
