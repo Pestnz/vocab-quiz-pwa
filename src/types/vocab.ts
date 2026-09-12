@@ -52,3 +52,27 @@ export type FilterType = 'all' | VocabType;
 
 // 並び替えオプション
 export type SortOption = 'created_desc' | 'created_asc' | 'term_asc' | 'term_desc';
+
+// 画面表示モード
+export type ViewMode = 'list' | 'quiz' | 'sentence';
+
+// 語彙強制使用（縛りプレイ）作文判定結果
+export interface SentenceCheckResult {
+  isPass: boolean;                // 文法的に成立しており指定単語をすべて使えているか
+  usedWords: string[];           // 正しく使われた指定単語
+  missingWords: string[];        // 使われなかった、または誤用された指定単語
+  grammarScore: number;          // 0〜100点
+  naturalCorrectedText: string;  // より自然なネイティブ表現の修正文
+  feedback: string;              // 文法上のミスやコロケーションの日本語解説
+}
+
+// 作文練習ログ（履歴保持用）
+export interface SentencePracticeLog {
+  id: string;
+  createdAt: string;
+  language: Language;
+  targetWordIds: string[];
+  targetTerms: string[];
+  userSentence: string;
+  result: SentenceCheckResult;
+}

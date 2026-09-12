@@ -1,9 +1,10 @@
 import React from 'react';
-import { BookOpen, BrainCircuit } from 'lucide-react';
+import { BookOpen, BrainCircuit, PenTool } from 'lucide-react';
+import type { ViewMode } from '../../types/vocab';
 
 interface BottomNavProps {
-  currentView: 'list' | 'quiz';
-  onViewChange: (view: 'list' | 'quiz') => void;
+  currentView: ViewMode;
+  onViewChange: (view: ViewMode) => void;
   dueCount: number;
 }
 
@@ -14,7 +15,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 }) => {
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800/80 safe-bottom">
-      <div className="grid grid-cols-2 h-14 max-w-lg mx-auto">
+      <div className="grid grid-cols-3 h-14 max-w-lg mx-auto">
         {/* 単語帳タブ */}
         <button
           onClick={() => onViewChange('list')}
@@ -26,6 +27,19 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         >
           <BookOpen className={`w-5 h-5 transition-transform ${currentView === 'list' ? 'scale-110' : ''}`} />
           <span className="text-[10px] tracking-tight">単語帳</span>
+        </button>
+
+        {/* 瞬間作文タブ */}
+        <button
+          onClick={() => onViewChange('sentence')}
+          className={`flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer select-none ${
+            currentView === 'sentence'
+              ? 'text-violet-400 font-semibold'
+              : 'text-slate-400 hover:text-slate-200 font-medium'
+          }`}
+        >
+          <PenTool className={`w-5 h-5 transition-transform ${currentView === 'sentence' ? 'scale-110' : ''}`} />
+          <span className="text-[10px] tracking-tight">瞬間作文</span>
         </button>
 
         {/* クイズタブ */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { BrainCircuit, Clock } from 'lucide-react';
+import { BrainCircuit, Clock, PenTool } from 'lucide-react';
 import { Header } from './components/Layout/Header';
 import { BottomNav } from './components/Layout/BottomNav';
 import { QuickAddBar } from './components/Vocab/QuickAddBar';
@@ -7,6 +7,7 @@ import { VocabFilter } from './components/Vocab/VocabFilter';
 import { VocabList } from './components/Vocab/VocabList';
 import { VocabEditModal } from './components/Vocab/VocabEditModal';
 import { FlashcardQuiz } from './components/Quiz/FlashcardQuiz';
+import { SentenceBuilder } from './components/SentenceBuilder/SentenceBuilder';
 import { SettingsModal } from './components/Settings/SettingsModal';
 import type {
   VocabItem,
@@ -16,6 +17,7 @@ import type {
   FilterLanguage,
   FilterType,
   SortOption,
+  ViewMode,
 } from './types/vocab';
 import {
   getStoredSettings,
@@ -40,7 +42,7 @@ export const App: React.FC = () => {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
 
-  const [currentView, setCurrentView] = useState<'list' | 'quiz'>('list');
+  const [currentView, setCurrentView] = useState<ViewMode>('list');
   
   // 追加処理中および進捗表示
   const [isAdding, setIsAdding] = useState(false);
@@ -241,6 +243,83 @@ export const App: React.FC = () => {
     });
   }, [pushToRemote]);
 
+  // 瞬間作文モード: 合格時の処理（習熟度+1、間隔反復で次次回日設定、リモート同期）
+  const handleSentencePass = useCallback((items: VocabItem[]) => {
+    const itemIds = new Set(items.map(i => i.id));
+    const now = new Date();
+    const intervals = [0, 1, 3, 7, 14, 30];
+
+    setVocabList(prev => {
+      const nextList = prev.map(item => {
+        if (!itemIds.has(item.id)) return item;
+        const curProf = item.proficiency ?? 0;
+        const newProf = Math.min(curProf + 1, 5);
+        const days = intervals[newProf] || 1;
+        const nextDate = new Date();
+        nextDate.setDate(nextDate.getDate() + days);
+
+        return {
+          ...item,
+          proficiency: newProf,
+          nextReviewAt: nextDate.toISOString(),
+          updatedAt: now.toISOString(),
+        };
+      });
+
+      setCachedVocab(nextList);
+      pushToRemote(nextList, `sync(sentence): pass challenge for ${items.map(i => i.term).join(', ')}`);
+      return nextList;
+    });
+
+    showToast(`合格！${items.length}語の習熟度を上げました`, 'success');
+  }, [pushToRemote, showToast]);
+
+  // 瞬間作文モード: 不合格時の処理（復習予定日を即座にリセット、リモート同期）
+  const handleSentenceFail = useCallback((items: VocabItem[]) => {
+    const itemIds = new Set(items.map(i => i.id));
+    const now = new Date().toISOString();
+
+    setVocabList(prev => {
+      const nextList = prev.map(item => {
+        if (!itemIds.has(item.id)) return item;
+        return {
+          ...item,
+          nextReviewAt: now,
+          updatedAt: now,
+        };
+      });
+
+      setCachedVocab(nextList);
+      pushToRemote(nextList, `sync(sentence): retry challenge for ${items.map(i => i.term).join(', ')}`);
+      return nextList;
+    });
+  }, [pushToRemote]);
+
+  // 瞬間作文モード: 添削文を単語帳の例文として上書き保存
+  const handleSaveSentenceExample = useCallback((wordId: string, newSentence: string, newTranslation?: string) => {
+    const now = new Date().toISOString();
+    let targetTerm = '';
+
+    setVocabList(prev => {
+      const nextList = prev.map(item => {
+        if (item.id !== wordId) return item;
+        targetTerm = item.term;
+        return {
+          ...item,
+          exampleSentence: newSentence,
+          exampleTranslation: newTranslation || item.exampleTranslation,
+          updatedAt: now,
+        };
+      });
+
+      setCachedVocab(nextList);
+      pushToRemote(nextList, `fix(vocab): update example for "${targetTerm || wordId}"`);
+      return nextList;
+    });
+
+    showToast(`「${targetTerm}」の例文を更新しました`, 'success');
+  }, [pushToRemote, showToast]);
+
   const handleSaveSettings = (newSettings: AppSettings) => {
     setSettings(newSettings);
     saveStoredSettings(newSettings);
@@ -413,14 +492,25 @@ export const App: React.FC = () => {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => setCurrentView('quiz')}
-                    disabled={vocabList.length === 0}
-                    className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-950 disabled:opacity-40 cursor-pointer"
-                  >
-                    <BrainCircuit className="w-4 h-4" />
-                    <span>フラッシュカードで復習する</span>
-                  </button>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => setCurrentView('sentence')}
+                      disabled={vocabList.length === 0}
+                      className="w-full py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-violet-950 disabled:opacity-40 cursor-pointer"
+                    >
+                      <PenTool className="w-4 h-4" />
+                      <span>瞬間作文（縛りプレイ）</span>
+                    </button>
+
+                    <button
+                      onClick={() => setCurrentView('quiz')}
+                      disabled={vocabList.length === 0}
+                      className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-950 disabled:opacity-40 cursor-pointer"
+                    >
+                      <BrainCircuit className="w-4 h-4" />
+                      <span>フラッシュカードで復習する</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -440,6 +530,17 @@ export const App: React.FC = () => {
               </div>
             </div>
           </>
+        ) : currentView === 'sentence' ? (
+          <SentenceBuilder
+            vocabList={vocabList}
+            apiKey={settings.geminiApiKey}
+            defaultLanguage={settings.defaultLanguage}
+            onExit={() => setCurrentView('list')}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            onPass={handleSentencePass}
+            onFail={handleSentenceFail}
+            onSaveExample={handleSaveSentenceExample}
+          />
         ) : (
           <FlashcardQuiz
             vocabList={vocabList}

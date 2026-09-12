@@ -1,11 +1,11 @@
 import React from 'react';
-import { BookOpen, BrainCircuit, Settings } from 'lucide-react';
-import type { SyncStatusState } from '../../types/vocab';
+import { BookOpen, BrainCircuit, PenTool, Settings } from 'lucide-react';
+import type { SyncStatusState, ViewMode } from '../../types/vocab';
 import { SyncStatusBadge } from './SyncStatusBadge';
 
 interface HeaderProps {
-  currentView: 'list' | 'quiz';
-  onViewChange: (view: 'list' | 'quiz') => void;
+  currentView: ViewMode;
+  onViewChange: (view: ViewMode) => void;
   syncStatus: SyncStatusState;
   lastSyncedAt?: string;
   errorMessage?: string;
@@ -56,6 +56,17 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <BookOpen className="w-3.5 h-3.5" />
               <span>単語帳</span>
+            </button>
+            <button
+              onClick={() => onViewChange('sentence')}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                currentView === 'sentence'
+                  ? 'bg-violet-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <PenTool className="w-3.5 h-3.5" />
+              <span>瞬間作文</span>
             </button>
             <button
               onClick={() => onViewChange('quiz')}
