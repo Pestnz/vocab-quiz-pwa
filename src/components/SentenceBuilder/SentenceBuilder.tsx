@@ -13,38 +13,51 @@ import {
   ChevronUp,
   ArrowLeft,
   AlertCircle,
+  History,
+  PenTool,
 } from 'lucide-react';
 import type {
   VocabDatabase,
   VocabItem,
   Language,
   SentenceCheckResult,
+  SentencePracticeLog,
 } from '../../types/vocab';
 import { pickSentenceWords } from '../../services/sentencePicker';
 import { checkSentenceWithGemini } from '../../services/sentenceCheck';
 import { speakTerm } from '../../services/speech';
+import { SentenceHistoryList } from './SentenceHistoryList';
 
 interface SentenceBuilderProps {
   vocabList: VocabDatabase;
   apiKey: string;
   defaultLanguage?: Language;
+  history: SentencePracticeLog[];
   onExit: () => void;
   onOpenSettings: () => void;
   onPass: (items: VocabItem[]) => void;
   onFail: (items: VocabItem[]) => void;
   onSaveExample: (wordId: string, newSentence: string, newTranslation?: string) => Promise<void> | void;
+  onSaveLog: (log: SentencePracticeLog) => void;
+  onDeleteLog: (id: string) => void;
 }
 
 export const SentenceBuilder: React.FC<SentenceBuilderProps> = ({
   vocabList,
   apiKey,
   defaultLanguage = 'en',
+  history,
   onExit,
   onOpenSettings,
   onPass,
   onFail,
   onSaveExample,
+  onSaveLog,
+  onDeleteLog,
 }) => {
+  // 作文 vs 履歴タブ
+  const [activeSubTab, setActiveSubTab] = useState<'challenge' | 'history'>('challenge');
+
   // 言語選択（DBにある言語を優先、デフォルト言語）
   const [selectedLanguage, setSelectedLanguage] = useState<Language>(() => {
     if (vocabList.some(v => v.language === defaultLanguage)) {
@@ -161,6 +174,20 @@ export const SentenceBuilder: React.FC<SentenceBuilderProps> = ({
 
       setResult(res);
 
+      // 履歴ログを作成して保存
+      const newLog: SentencePracticeLog = {
+        id: typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        createdAt: new Date().toISOString(),
+        language: selectedLanguage,
+        targetWordIds: currentWords.map(w => w.id),
+        targetTerms: currentWords.map(w => w.term),
+        userSentence: userSentence.trim(),
+        result: res,
+      };
+      onSaveLog(newLog);
+
       if (res.isPass) {
         // 合格処理（習熟度UP + 次回復習日延長）
         onPass(currentWords);
@@ -215,44 +242,11 @@ export const SentenceBuilder: React.FC<SentenceBuilderProps> = ({
     }
   };
 
-  // 単語帳に単語が存在しない場合
-  if (totalInLang === 0) {
-    return (
-      <div className="max-w-2xl mx-auto px-4 py-12 text-center space-y-6">
-        <div className="w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 mx-auto flex items-center justify-center text-amber-400">
-          <AlertCircle className="w-8 h-8" />
-        </div>
-        <div className="space-y-2">
-          <h2 className="text-lg font-bold text-slate-100">
-            {selectedLanguage === 'en' ? '英語' : 'ポルトガル語'}の単語が登録されていません
-          </h2>
-          <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
-            瞬間作文（縛りプレイ）を行うには、単語帳に対象言語の単語が登録されている必要があります。まずは単語をいくつか登録するか、別の言語に切り替えてください。
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-center gap-3">
-          <button
-            onClick={() => handleLanguageChange(selectedLanguage === 'en' ? 'pt' : 'en')}
-            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-semibold cursor-pointer transition-colors"
-          >
-            {selectedLanguage === 'en' ? 'ポルトガル語に切り替える' : '英語に切り替える'}
-          </button>
-          <button
-            onClick={onExit}
-            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold cursor-pointer transition-colors"
-          >
-            単語帳に戻って登録する
-          </button>
-        </div>
-      </div>
-    );
-  }
-
+  // 履歴タブが選ばれている場合は、単語登録が0件でも履歴を表示可能
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-6 py-4 space-y-5">
-      {/* 上部コントロールバー */}
-      <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3">
+      {/* 最上部：戻るボタン & サブタブ（作文チャレンジ / 過去の履歴） */}
+      <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3 flex-wrap">
         <button
           onClick={onExit}
           className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors cursor-pointer py-1 px-2 rounded-lg hover:bg-slate-800/60"
@@ -261,60 +255,142 @@ export const SentenceBuilder: React.FC<SentenceBuilderProps> = ({
           <span>単語帳へ戻る</span>
         </button>
 
-        <div className="flex items-center gap-2">
-          {/* 言語選択 */}
-          <div className="flex bg-slate-800/80 p-0.5 rounded-lg border border-slate-700/60 text-xs">
-            <button
-              onClick={() => handleLanguageChange('en')}
-              className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
-                selectedLanguage === 'en'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              EN
-            </button>
-            <button
-              onClick={() => handleLanguageChange('pt')}
-              className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
-                selectedLanguage === 'pt'
-                  ? 'bg-amber-600 text-white shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              PT
-            </button>
-          </div>
-
-          {/* 単語数選択 */}
-          <div className="flex items-center gap-1 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700/60 text-xs">
-            <span className="text-[11px] text-slate-400 hidden sm:inline">語数:</span>
-            {[1, 2, 3, 4, 5].map(num => (
-              <button
-                key={num}
-                onClick={() => handleWordCountChange(num)}
-                className={`w-6 h-6 rounded-md font-bold transition-all text-xs cursor-pointer flex items-center justify-center ${
-                  wordCount === num
-                    ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
-                }`}
-                title={`${num}個の単語で作文`}
-              >
-                {num}
-              </button>
-            ))}
-          </div>
-
-          {/* リロールボタン */}
+        {/* サブタブ切替 */}
+        <div className="flex bg-slate-800/90 p-0.5 rounded-xl border border-slate-700/80 text-xs">
           <button
-            onClick={() => drawWords(wordCount, selectedLanguage)}
-            title="別の単語を再抽選"
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer transition-all hover:scale-105 active:scale-95"
+            onClick={() => setActiveSubTab('challenge')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
+              activeSubTab === 'challenge'
+                ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
           >
-            <RefreshCw className="w-4 h-4" />
+            <PenTool className="w-3.5 h-3.5" />
+            <span>作文チャレンジ</span>
+          </button>
+          <button
+            onClick={() => setActiveSubTab('history')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
+              activeSubTab === 'history'
+                ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>過去の履歴</span>
+            {history.length > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                  activeSubTab === 'history'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-slate-700 text-slate-300'
+                }`}
+              >
+                {history.length}
+              </span>
+            )}
           </button>
         </div>
       </div>
+
+      {activeSubTab === 'history' ? (
+        <SentenceHistoryList
+          history={history}
+          vocabList={vocabList}
+          onDeleteLog={onDeleteLog}
+          onSaveExample={onSaveExample}
+        />
+      ) : totalInLang === 0 ? (
+        <div className="max-w-2xl mx-auto px-4 py-12 text-center space-y-6">
+          <div className="w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 mx-auto flex items-center justify-center text-amber-400">
+            <AlertCircle className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-lg font-bold text-slate-100">
+              {selectedLanguage === 'en' ? '英語' : 'ポルトガル語'}の単語が登録されていません
+            </h2>
+            <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+              瞬間作文（縛りプレイ）を行うには、単語帳に対象言語の単語が登録されている必要があります。まずは単語をいくつか登録するか、別の言語に切り替えてください。
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={() => handleLanguageChange(selectedLanguage === 'en' ? 'pt' : 'en')}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-semibold cursor-pointer transition-colors"
+            >
+              {selectedLanguage === 'en' ? 'ポルトガル語に切り替える' : '英語に切り替える'}
+            </button>
+            <button
+              onClick={onExit}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold cursor-pointer transition-colors"
+            >
+              単語帳に戻って登録する
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* コントロールバー（言語・語数・リロール） */}
+          <div className="flex items-center justify-between gap-2 bg-slate-850/60 p-2.5 rounded-xl border border-slate-800">
+            <div className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+              <span>出題設定:</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* 言語選択 */}
+              <div className="flex bg-slate-800/80 p-0.5 rounded-lg border border-slate-700/60 text-xs">
+                <button
+                  onClick={() => handleLanguageChange('en')}
+                  className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
+                    selectedLanguage === 'en'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  EN
+                </button>
+                <button
+                  onClick={() => handleLanguageChange('pt')}
+                  className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
+                    selectedLanguage === 'pt'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  PT
+                </button>
+              </div>
+
+              {/* 単語数選択 */}
+              <div className="flex items-center gap-1 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700/60 text-xs">
+                <span className="text-[11px] text-slate-400 hidden sm:inline">語数:</span>
+                {[1, 2, 3, 4, 5].map(num => (
+                  <button
+                    key={num}
+                    onClick={() => handleWordCountChange(num)}
+                    className={`w-6 h-6 rounded-md font-bold transition-all text-xs cursor-pointer flex items-center justify-center ${
+                      wordCount === num
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
+                    }`}
+                    title={`${num}個の単語で作文`}
+                  >
+                    {num}
+                  </button>
+                ))}
+              </div>
+
+              {/* リロールボタン */}
+              <button
+                onClick={() => drawWords(wordCount, selectedLanguage)}
+                title="別の単語を再抽選"
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer transition-all hover:scale-105 active:scale-95"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
 
       {/* 出題カードコンテナ */}
       <div className="bg-slate-850/80 rounded-2xl border border-slate-800 p-4 sm:p-5 shadow-lg space-y-4">
@@ -663,6 +739,8 @@ export const SentenceBuilder: React.FC<SentenceBuilderProps> = ({
             </button>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

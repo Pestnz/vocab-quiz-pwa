@@ -18,12 +18,15 @@ import type {
   FilterType,
   SortOption,
   ViewMode,
+  SentencePracticeLog,
 } from './types/vocab';
 import {
   getStoredSettings,
   saveStoredSettings,
   getCachedVocab,
   setCachedVocab,
+  getCachedSentenceHistory,
+  setCachedSentenceHistory,
 } from './services/storage';
 import { githubSyncService } from './services/githubSync';
 import { analyzeVocabularyBatch } from './services/gemini';
@@ -34,6 +37,7 @@ export const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(getStoredSettings);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [vocabList, setVocabList] = useState<VocabDatabase>(getCachedVocab);
+  const [sentenceHistory, setSentenceHistory] = useState<SentencePracticeLog[]>(getCachedSentenceHistory);
 
   const [syncStatus, setSyncStatus] = useState<SyncStatusState>(() => {
     const s = getStoredSettings();
@@ -85,6 +89,18 @@ export const App: React.FC = () => {
         setCachedVocab(merged, res.sha || undefined);
         return merged;
       });
+
+      // 作文履歴の取得とマージ
+      try {
+        const historyRes = await githubSyncService.fetchSentenceHistory(currentSettings);
+        setSentenceHistory(prevLocal => {
+          const merged = githubSyncService.mergeSentenceHistory(prevLocal, historyRes.data);
+          setCachedSentenceHistory(merged, historyRes.sha || undefined);
+          return merged;
+        });
+      } catch (hErr) {
+        console.warn('Sentence history fetch warning (file might be newly created)', hErr);
+      }
 
       setSyncStatus('synced');
       setLastSyncedAt(new Date().toISOString());
@@ -139,6 +155,25 @@ export const App: React.FC = () => {
       setSyncStatus('error');
       setErrorMessage(err.message);
       showToast(`GitHub保存エラー: ${err.message}`, 'error');
+    }
+  }, [settings, showToast]);
+
+  // 作文履歴のGitHubプッシュ
+  const pushSentenceHistoryToRemote = useCallback(async (
+    updatedHistory: SentencePracticeLog[],
+    commitMessage: string
+  ) => {
+    if (!settings.githubToken || !settings.repoOwner || !settings.repoName) {
+      return;
+    }
+
+    try {
+      const res = await githubSyncService.pushSentenceHistory(updatedHistory, settings, commitMessage);
+      setCachedSentenceHistory(updatedHistory, res.sha);
+    } catch (e: unknown) {
+      const err = e as Error;
+      console.error('Push sentence history failed', err);
+      showToast(`作文履歴のGitHub同期エラー: ${err.message}`, 'error');
     }
   }, [settings, showToast]);
 
@@ -319,6 +354,30 @@ export const App: React.FC = () => {
 
     showToast(`「${targetTerm}」の例文を更新しました`, 'success');
   }, [pushToRemote, showToast]);
+
+  // 瞬間作文モード: 作文履歴の追加＆GitHub同期
+  const handleSaveSentenceLog = useCallback((newLog: SentencePracticeLog) => {
+    setSentenceHistory(prev => {
+      const nextHistory = [newLog, ...prev.filter(l => l.id !== newLog.id)];
+      setCachedSentenceHistory(nextHistory);
+      pushSentenceHistoryToRemote(
+        nextHistory,
+        `feat(sentence): record practice (${newLog.targetTerms.join(', ')})`
+      );
+      return nextHistory;
+    });
+  }, [pushSentenceHistoryToRemote]);
+
+  // 瞬間作文モード: 作文履歴の個別削除＆GitHub同期
+  const handleDeleteSentenceLog = useCallback((logId: string) => {
+    setSentenceHistory(prev => {
+      const nextHistory = prev.filter(l => l.id !== logId);
+      setCachedSentenceHistory(nextHistory);
+      pushSentenceHistoryToRemote(nextHistory, 'refactor(sentence): remove history record');
+      return nextHistory;
+    });
+    showToast('作文履歴を削除しました', 'info');
+  }, [pushSentenceHistoryToRemote, showToast]);
 
   const handleSaveSettings = (newSettings: AppSettings) => {
     setSettings(newSettings);
@@ -535,11 +594,14 @@ export const App: React.FC = () => {
             vocabList={vocabList}
             apiKey={settings.geminiApiKey}
             defaultLanguage={settings.defaultLanguage}
+            history={sentenceHistory}
             onExit={() => setCurrentView('list')}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onPass={handleSentencePass}
             onFail={handleSentenceFail}
             onSaveExample={handleSaveSentenceExample}
+            onSaveLog={handleSaveSentenceLog}
+            onDeleteLog={handleDeleteSentenceLog}
           />
         ) : (
           <FlashcardQuiz

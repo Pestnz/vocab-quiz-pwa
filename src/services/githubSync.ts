@@ -1,5 +1,12 @@
-import type { AppSettings, VocabDatabase, VocabItem } from '../types/vocab';
-import { getCachedSha, setCachedSha, setCachedVocab } from './storage';
+import type { AppSettings, SentencePracticeLog, VocabDatabase, VocabItem } from '../types/vocab';
+import {
+  getCachedSha,
+  setCachedSha,
+  setCachedVocab,
+  setCachedSentenceHistory,
+  getCachedSentenceHistorySha,
+  setCachedSentenceHistorySha,
+} from './storage';
 
 export function toBase64Utf8(str: string): string {
   const bytes = new TextEncoder().encode(str);
@@ -22,9 +29,11 @@ export function fromBase64Utf8(b64: string): string {
 
 export class GitHubSyncService {
   private currentSha: string | null = null;
+  private currentSentenceSha: string | null = null;
 
   constructor() {
     this.currentSha = getCachedSha();
+    this.currentSentenceSha = getCachedSentenceHistorySha();
   }
 
   public getSha(): string | null {
@@ -35,6 +44,17 @@ export class GitHubSyncService {
     this.currentSha = sha;
     if (sha) {
       setCachedSha(sha);
+    }
+  }
+
+  public getSentenceSha(): string | null {
+    return this.currentSentenceSha;
+  }
+
+  public setSentenceSha(sha: string | null): void {
+    this.currentSentenceSha = sha;
+    if (sha) {
+      setCachedSentenceHistorySha(sha);
     }
   }
 
@@ -185,6 +205,155 @@ export class GitHubSyncService {
       }
     }
 
+    return Array.from(map.values()).sort((a, b) => {
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }
+
+  /**
+   * GitHubリポジトリから sentence_history.json を取得する
+   */
+  public async fetchSentenceHistory(
+    settings: AppSettings
+  ): Promise<{ data: SentencePracticeLog[]; sha: string | null }> {
+    const { githubToken, repoOwner, repoName, branch } = settings;
+
+    if (!githubToken || !repoOwner || !repoName) {
+      throw new Error('GitHub設定が未完了です。');
+    }
+
+    const filePath = 'sentence_history.json';
+    const url = `https://api.github.com/repos/${encodeURIComponent(repoOwner.trim())}/${encodeURIComponent(
+      repoName.trim()
+    )}/contents/${filePath}?ref=${encodeURIComponent(branch.trim() || 'main')}&_t=${Date.now()}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.getHeaders(githubToken),
+      cache: 'no-store',
+    });
+
+    if (response.status === 404) {
+      this.setSentenceSha(null);
+      setCachedSentenceHistory([]);
+      return { data: [], sha: null };
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.message || `GitHub取得エラー (${response.status} ${response.statusText})`
+      );
+    }
+
+    const data = await response.json();
+    const sha = data.sha as string;
+    this.setSentenceSha(sha);
+
+    let parsedData: SentencePracticeLog[] = [];
+    if (data.content) {
+      const jsonString = fromBase64Utf8(data.content);
+      parsedData = JSON.parse(jsonString);
+      if (!Array.isArray(parsedData)) {
+        parsedData = [];
+      }
+    }
+
+    setCachedSentenceHistory(parsedData, sha);
+    return { data: parsedData, sha };
+  }
+
+  /**
+   * sentence_history.json を GitHub にコミット・プッシュする
+   */
+  public async pushSentenceHistory(
+    data: SentencePracticeLog[],
+    settings: AppSettings,
+    commitMessage: string,
+    retryCount = 0
+  ): Promise<{ sha: string }> {
+    const { githubToken, repoOwner, repoName, branch } = settings;
+
+    if (!githubToken || !repoOwner || !repoName) {
+      throw new Error('GitHub設定が未完了です。');
+    }
+
+    const filePath = 'sentence_history.json';
+    const url = `https://api.github.com/repos/${encodeURIComponent(repoOwner.trim())}/${encodeURIComponent(
+      repoName.trim()
+    )}/contents/${filePath}`;
+
+    const jsonString = JSON.stringify(data, null, 2);
+    const base64Content = toBase64Utf8(jsonString);
+
+    const payload: {
+      message: string;
+      content: string;
+      branch: string;
+      sha?: string;
+    } = {
+      message: commitMessage,
+      content: base64Content,
+      branch: branch.trim() || 'main',
+    };
+
+    const currentSha = this.currentSentenceSha || getCachedSentenceHistorySha();
+    if (currentSha) {
+      payload.sha = currentSha;
+    }
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: this.getHeaders(githubToken),
+      body: JSON.stringify(payload),
+    });
+
+    if (response.status === 409) {
+      if (retryCount >= 2) {
+        throw new Error('作文履歴の競合が複数回発生しました。手動で同期してください。');
+      }
+
+      console.warn('409 Conflict in sentence_history. Merging with remote...');
+      const remote = await this.fetchSentenceHistory(settings);
+      const merged = this.mergeSentenceHistory(data, remote.data);
+      return this.pushSentenceHistory(merged, settings, `${commitMessage} (auto-merge)`, retryCount + 1);
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.message || `GitHub保存エラー (${response.status} ${response.statusText})`
+      );
+    }
+
+    const result = await response.json();
+    const newSha = result.content.sha as string;
+    this.setSentenceSha(newSha);
+    setCachedSentenceHistory(data, newSha);
+
+    return { sha: newSha };
+  }
+
+  /**
+   * ローカルとリモートの作文履歴をマージする（IDベース）
+   */
+  public mergeSentenceHistory(
+    local: SentencePracticeLog[],
+    remote: SentencePracticeLog[]
+  ): SentencePracticeLog[] {
+    const map = new Map<string, SentencePracticeLog>();
+
+    for (const item of remote) {
+      map.set(item.id, item);
+    }
+
+    for (const localItem of local) {
+      if (!map.has(localItem.id)) {
+        map.set(localItem.id, localItem);
+      }
+    }
+
+    // 作成日時降順でソート
     return Array.from(map.values()).sort((a, b) => {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
