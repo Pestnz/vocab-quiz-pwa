@@ -4,10 +4,9 @@ import type { DiaryCheckParams, DiaryCheckResult, DiarySuggestedVocab } from '..
 const PRIMARY_MODEL = 'gemini-2.0-flash';
 const FALLBACK_MODELS = [
   'gemini-2.0-flash',
-  'gemini-1.5-flash-latest',
   'gemini-2.0-flash-lite',
+  'gemini-1.5-flash-latest',
   'gemini-1.5-flash-8b',
-  'gemini-1.5-flash',
   'gemini-1.5-pro-latest',
 ];
 

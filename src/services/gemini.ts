@@ -5,10 +5,9 @@ import type { VocabAnalysisResult } from '../types/vocab';
 const PRIMARY_MODEL = 'gemini-2.0-flash';
 const FALLBACK_MODELS = [
   'gemini-2.0-flash',
-  'gemini-1.5-flash-latest',
   'gemini-2.0-flash-lite',
+  'gemini-1.5-flash-latest',
   'gemini-1.5-flash-8b',
-  'gemini-1.5-flash',
   'gemini-1.5-pro-latest',
 ];
 const BATCH_CHUNK_SIZE = 15; // 1回あたりの最大安全チャンク数
