@@ -70,7 +70,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleTestGemini = async () => {
-    setGeminiTestState({ loading: true, message: 'Gemini 2.5 Flash に問い合わせ中...' });
+    setGeminiTestState({ loading: true, message: 'Gemini 2.0 Flash に問い合わせ中...' });
     const res = await testGeminiApiKey(form.geminiApiKey);
     setGeminiTestState({
       loading: false,
@@ -254,7 +254,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
               <div className="flex items-center gap-1.5 font-medium text-slate-200 text-sm">
                 <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>Gemini 3.6 Flash API 設定</span>
+                <span>Gemini 2.0 Flash API 設定</span>
               </div>
               <a
                 href="https://aistudio.google.com/app/apikey"

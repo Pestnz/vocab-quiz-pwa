@@ -137,7 +137,9 @@ Maintain the order of the inputs.`;
       return await processBatchChunkRest(prompt, apiKey, preferredLanguage, systemInstruction, model, items);
     } catch (err: unknown) {
       console.warn(`Model ${model} failed in batch, trying next...`, err);
-      lastError = err as Error;
+      if (!lastError) {
+        lastError = err as Error;
+      }
     }
   }
 
@@ -160,14 +162,14 @@ async function processBatchChunkRest(
       const url = `https://generativelanguage.googleapis.com/${ver}/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
       
       const payload = {
-        system_instruction: {
-          parts: [{ text: systemInstruction }]
-        },
         contents: [
           {
             parts: [{ text: prompt }]
           }
         ],
+        systemInstruction: {
+          parts: [{ text: systemInstruction }]
+        },
         generationConfig: {
           responseMimeType: 'application/json',
         }

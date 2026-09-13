@@ -97,7 +97,9 @@ ${userSentence.trim()}
       return await checkSentenceRest(prompt, apiKey, systemInstruction, model, targetWords.map(w => w.term));
     } catch (err: unknown) {
       console.warn(`Model ${model} failed for sentence check, trying next...`, err);
-      lastError = err as Error;
+      if (!lastError) {
+        lastError = err as Error;
+      }
     }
   }
 
@@ -119,14 +121,14 @@ async function checkSentenceRest(
       const url = `https://generativelanguage.googleapis.com/${ver}/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
 
       const payload = {
-        system_instruction: {
-          parts: [{ text: systemInstruction }],
-        },
         contents: [
           {
             parts: [{ text: prompt }],
           },
         ],
+        systemInstruction: {
+          parts: [{ text: systemInstruction }],
+        },
         generationConfig: {
           responseMimeType: 'application/json',
         },

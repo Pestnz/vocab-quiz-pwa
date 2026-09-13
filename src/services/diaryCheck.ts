@@ -85,7 +85,6 @@ ${originalText.trim()}
       config: {
         systemInstruction,
         responseMimeType: 'application/json',
-        maxOutputTokens: 8192,
         temperature: 0.3,
       },
     });
@@ -105,7 +104,9 @@ ${originalText.trim()}
       return await checkDiaryRest(prompt, apiKey, systemInstruction, model);
     } catch (err: unknown) {
       console.warn(`Model ${model} failed for diary check, trying next...`, err);
-      lastError = err as Error;
+      if (!lastError) {
+        lastError = err as Error;
+      }
     }
   }
 
@@ -128,26 +129,20 @@ async function checkDiaryRest(
     try {
       const url = `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
 
-      const payload = {
-        system_instruction: {
-          parts: [{ text: systemInstruction }],
-        },
+      // Google AI Studio REST API 標準形式（systemInstruction / system_instruction 両対応互換）
+      const payload: Record<string, any> = {
         contents: [
           {
             parts: [{ text: prompt }],
           },
         ],
+        systemInstruction: {
+          parts: [{ text: systemInstruction }],
+        },
         generationConfig: {
           responseMimeType: 'application/json',
           temperature: 0.3,
-          maxOutputTokens: 8192,
         },
-        safetySettings: [
-          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-        ],
       };
 
       const res = await fetch(url, {
@@ -158,7 +153,8 @@ async function checkDiaryRest(
 
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody.error?.message || `HTTP ${res.status}: ${res.statusText}`);
+        const msg = errBody.error?.message || `HTTP ${res.status}: ${res.statusText}`;
+        throw new Error(msg);
       }
 
       const data = await res.json();
@@ -182,16 +178,31 @@ async function checkDiaryRest(
 }
 
 /**
- * レスポンスJSONのパースとサニタイズ
+ * レスポンスJSONのパースとサニタイズ（長文やMarkdown混じりでも頑健に抽出）
  */
-function parseAndSanitizeDiaryResult(rawJson: string): DiaryCheckResult {
-  const clean = rawJson.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+function parseAndSanitizeDiaryResult(rawText: string): DiaryCheckResult {
+  let clean = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  
+  // JSONオブジェクト部分 {...} のみを抽出するフォールバック
+  if (!clean.startsWith('{')) {
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      clean = jsonMatch[0];
+    }
+  }
+
   let parsed: any;
   try {
     parsed = JSON.parse(clean);
   } catch (e) {
-    console.error('Failed to parse diary JSON:', rawJson);
-    throw new Error('AIからの応答をJSONとして解析できませんでした。もう一度お試しください。');
+    // 末尾のカンマや不完全JSONの救済を試みる
+    try {
+      const fixed = clean.replace(/,\s*([}\]])/g, '$1');
+      parsed = JSON.parse(fixed);
+    } catch (innerErr) {
+      console.error('Failed to parse diary JSON:', rawText);
+      throw new Error('AI添削の応答解析に失敗しました。もう一度実行してください。');
+    }
   }
 
   const correctedText = String(parsed.correctedText || '').trim();

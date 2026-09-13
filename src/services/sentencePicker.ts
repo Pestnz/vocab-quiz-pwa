@@ -81,8 +81,14 @@ export function pickSentenceWords(
   };
 }
 
-const PRIMARY_MODEL = 'gemini-3.6-flash';
-const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
+const PRIMARY_MODEL = 'gemini-2.0-flash';
+const FALLBACK_MODELS = [
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-flash-8b',
+  'gemini-1.5-pro-latest',
+];
 
 export interface GenerateAiWordsOptions {
   count: number;
@@ -174,7 +180,9 @@ Output MUST be ONLY a JSON array with this exact format:
       return await generateAiWordsRest(prompt, apiKey, systemInstruction, model, language);
     } catch (err: unknown) {
       console.warn(`Model ${model} failed for AI word generation, trying next...`, err);
-      lastError = err as Error;
+      if (!lastError) {
+        lastError = err as Error;
+      }
     }
   }
 
