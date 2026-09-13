@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { BrainCircuit, Clock, PenTool } from 'lucide-react';
+import { BrainCircuit, Clock, PenTool, Calendar } from 'lucide-react';
 import { Header } from './components/Layout/Header';
 import { BottomNav } from './components/Layout/BottomNav';
 import { QuickAddBar } from './components/Vocab/QuickAddBar';
@@ -8,6 +8,7 @@ import { VocabList } from './components/Vocab/VocabList';
 import { VocabEditModal } from './components/Vocab/VocabEditModal';
 import { FlashcardQuiz } from './components/Quiz/FlashcardQuiz';
 import { SentenceBuilder } from './components/SentenceBuilder/SentenceBuilder';
+import { DiaryView } from './components/Diary/DiaryView';
 import { SettingsModal } from './components/Settings/SettingsModal';
 import type {
   VocabItem,
@@ -19,7 +20,9 @@ import type {
   SortOption,
   ViewMode,
   SentencePracticeLog,
+  Language,
 } from './types/vocab';
+import type { DiaryItem, DiarySuggestedVocab } from './types/diary';
 import {
   getStoredSettings,
   saveStoredSettings,
@@ -27,9 +30,13 @@ import {
   setCachedVocab,
   getCachedSentenceHistory,
   setCachedSentenceHistory,
+  getCachedDiary,
+  setCachedDiary,
   addDeletedItemId,
   removeDeletedItemId,
   addDeletedSentenceLogId,
+  addDeletedDiaryId,
+  removeDeletedDiaryId,
 } from './services/storage';
 import { githubSyncService } from './services/githubSync';
 import { analyzeVocabularyBatch } from './services/gemini';
@@ -42,6 +49,7 @@ export const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [vocabList, setVocabList] = useState<VocabDatabase>(getCachedVocab);
   const [sentenceHistory, setSentenceHistory] = useState<SentencePracticeLog[]>(getCachedSentenceHistory);
+  const [diaryList, setDiaryList] = useState<DiaryItem[]>(getCachedDiary);
 
   const [syncStatus, setSyncStatus] = useState<SyncStatusState>(() => {
     const s = getStoredSettings();
@@ -109,6 +117,18 @@ export const App: React.FC = () => {
         });
       } catch (hErr) {
         console.warn('Sentence history fetch warning (file might be newly created)', hErr);
+      }
+
+      // 日記データの取得とマージ
+      try {
+        const diaryRes = await githubSyncService.fetchDiary(currentSettings);
+        setDiaryList(prevLocal => {
+          const merged = githubSyncService.mergeDiary(prevLocal, diaryRes.data);
+          setCachedDiary(merged, diaryRes.sha || undefined);
+          return merged;
+        });
+      } catch (dErr) {
+        console.warn('Diary fetch warning (file might be newly created)', dErr);
       }
 
       setSyncStatus('synced');
@@ -195,6 +215,30 @@ export const App: React.FC = () => {
       const err = e as Error;
       console.error('Push sentence history failed', err);
       showToast(`作文履歴のGitHub同期エラー: ${err.message}`, 'error');
+    } finally {
+      isPushingRef.current = false;
+    }
+  }, [settings, showToast]);
+
+  // 日記データのGitHubプッシュ
+  const pushDiaryToRemote = useCallback(async (
+    updatedDiary: DiaryItem[],
+    commitMessage: string
+  ) => {
+    if (!settings.githubToken || !settings.repoOwner || !settings.repoName) {
+      return;
+    }
+
+    isPushingRef.current = true;
+    lastMutationTimeRef.current = Date.now();
+
+    try {
+      const res = await githubSyncService.pushDiary(updatedDiary, settings, commitMessage);
+      setCachedDiary(updatedDiary, res.sha);
+    } catch (e: unknown) {
+      const err = e as Error;
+      console.error('Push diary failed', err);
+      showToast(`日記のGitHub同期エラー: ${err.message}`, 'error');
     } finally {
       isPushingRef.current = false;
     }
@@ -470,6 +514,123 @@ export const App: React.FC = () => {
     await pushToRemote(nextList, `feat(vocab): add "${itemToAdd.term}" from AI practice`);
   }, [vocabList, pushToRemote, showToast]);
 
+  // 日記モード: 日記の保存＆GitHub同期
+  const handleSaveDiary = useCallback(async (newDiary: DiaryItem) => {
+    removeDeletedDiaryId(newDiary.id);
+    setDiaryList(prev => {
+      const nextList = [
+        newDiary,
+        ...prev.filter(d => d.id !== newDiary.id && d.date !== newDiary.date),
+      ].sort((a, b) => b.date.localeCompare(a.date));
+      setCachedDiary(nextList);
+      pushDiaryToRemote(nextList, `feat(diary): save entry for ${newDiary.date}`);
+      return nextList;
+    });
+  }, [pushDiaryToRemote]);
+
+  // 日記モード: 日記の個別削除＆GitHub同期
+  const handleDeleteDiary = useCallback(async (diaryId: string) => {
+    lastMutationTimeRef.current = Date.now();
+    addDeletedDiaryId(diaryId);
+    setDiaryList(prev => {
+      const nextList = prev.filter(d => d.id !== diaryId);
+      setCachedDiary(nextList);
+      pushDiaryToRemote(nextList, 'refactor(diary): delete entry');
+      return nextList;
+    });
+  }, [pushDiaryToRemote]);
+
+  // 日記モード: おすすめ単語の個別単語帳登録
+  const handleAddDiaryVocab = useCallback(async (vocab: DiarySuggestedVocab, language: Language): Promise<boolean> => {
+    const candidate: Partial<VocabItem> = {
+      term: vocab.term,
+      meaning: vocab.meaning,
+      language,
+    };
+
+    const exists = vocabList.some(v => isDuplicateVocab(v, candidate as VocabItem));
+    if (exists) {
+      return false;
+    }
+
+    const now = new Date().toISOString();
+    const itemToAdd: VocabItem = {
+      id: typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `vocab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      language,
+      type: vocab.type || 'word',
+      sourceText: vocab.term,
+      term: vocab.term,
+      meaning: vocab.meaning,
+      explanation: vocab.explanation || '',
+      exampleSentence: vocab.exampleSentence || '',
+      exampleTranslation: vocab.exampleTranslation || '',
+      proficiency: 0,
+      nextReviewAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    removeDeletedItemId(itemToAdd.id);
+    const nextList = [itemToAdd, ...vocabList];
+    setVocabList(nextList);
+    setCachedVocab(nextList);
+    await pushToRemote(nextList, `feat(vocab): add "${itemToAdd.term}" from diary`);
+    return true;
+  }, [vocabList, pushToRemote]);
+
+  // 日記モード: おすすめ単語のまとめて単語帳登録
+  const handleAddAllDiaryVocab = useCallback(async (vocabs: DiarySuggestedVocab[], language: Language): Promise<number> => {
+    const now = new Date().toISOString();
+    const itemsToAdd: VocabItem[] = [];
+
+    for (const vocab of vocabs) {
+      const candidate: Partial<VocabItem> = {
+        term: vocab.term,
+        meaning: vocab.meaning,
+        language,
+      };
+
+      const exists = vocabList.some(v => isDuplicateVocab(v, candidate as VocabItem)) ||
+        itemsToAdd.some(v => isDuplicateVocab(v, candidate as VocabItem));
+
+      if (!exists) {
+        itemsToAdd.push({
+          id: typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `vocab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          language,
+          type: vocab.type || 'word',
+          sourceText: vocab.term,
+          term: vocab.term,
+          meaning: vocab.meaning,
+          explanation: vocab.explanation || '',
+          exampleSentence: vocab.exampleSentence || '',
+          exampleTranslation: vocab.exampleTranslation || '',
+          proficiency: 0,
+          nextReviewAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+
+    if (itemsToAdd.length === 0) {
+      return 0;
+    }
+
+    for (const item of itemsToAdd) {
+      removeDeletedItemId(item.id);
+    }
+
+    const nextList = [...itemsToAdd, ...vocabList];
+    setVocabList(nextList);
+    setCachedVocab(nextList);
+    await pushToRemote(nextList, `feat(vocab): add ${itemsToAdd.length} terms from diary`);
+    return itemsToAdd.length;
+  }, [vocabList, pushToRemote]);
+
   const handleSaveSettings = (newSettings: AppSettings) => {
     setSettings(newSettings);
     saveStoredSettings(newSettings);
@@ -644,6 +805,14 @@ export const App: React.FC = () => {
 
                   <div className="space-y-2">
                     <button
+                      onClick={() => setCurrentView('diary')}
+                      className="w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-amber-950 cursor-pointer"
+                    >
+                      <Calendar className="w-4 h-4" />
+                      <span>外国語日記 ＆ AI添削</span>
+                    </button>
+
+                    <button
                       onClick={() => setCurrentView('sentence')}
                       disabled={vocabList.length === 0}
                       className="w-full py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-violet-950 disabled:opacity-40 cursor-pointer"
@@ -695,6 +864,20 @@ export const App: React.FC = () => {
             onDeleteLog={handleDeleteSentenceLog}
             onAddCustomWord={handleAddCustomWord}
           />
+        ) : currentView === 'diary' ? (
+          <div className="p-3 sm:p-6 max-w-7xl mx-auto w-full">
+            <DiaryView
+              diaryList={diaryList}
+              settings={settings}
+              onSaveDiary={handleSaveDiary}
+              onDeleteDiary={handleDeleteDiary}
+              onAddVocabItem={handleAddDiaryVocab}
+              onAddAllVocabItems={handleAddAllDiaryVocab}
+              onExit={() => setCurrentView('list')}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              showToast={showToast}
+            />
+          </div>
         ) : (
           <FlashcardQuiz
             vocabList={vocabList}

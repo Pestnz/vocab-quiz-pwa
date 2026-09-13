@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, BrainCircuit, PenTool, Settings } from 'lucide-react';
+import { BookOpen, BrainCircuit, PenTool, Calendar, Settings } from 'lucide-react';
 import type { SyncStatusState, ViewMode } from '../../types/vocab';
 import { SyncStatusBadge } from './SyncStatusBadge';
 
@@ -67,6 +67,17 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <PenTool className="w-3.5 h-3.5" />
               <span>瞬間作文</span>
+            </button>
+            <button
+              onClick={() => onViewChange('diary')}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                currentView === 'diary'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>日記</span>
             </button>
             <button
               onClick={() => onViewChange('quiz')}

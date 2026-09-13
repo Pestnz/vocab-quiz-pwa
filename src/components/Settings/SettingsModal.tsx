@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, Key, Sparkles, RefreshCw, AlertCircle, ExternalLink } from 'lucide-react';
+import { X, Check, Key, Sparkles, RefreshCw, AlertCircle, ExternalLink, Lock } from 'lucide-react';
 import type { AppSettings } from '../../types/vocab';
 import { githubSyncService } from '../../services/githubSync';
 import { testGeminiApiKey } from '../../services/gemini';
+import { hashPassword } from '../../services/crypto';
 
 const GithubIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
   <svg className={className} fill="currentColor" viewBox="0 0 24 24">
@@ -28,6 +29,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSave,
 }) => {
   const [form, setForm] = useState<AppSettings>(settings);
+  const [diaryPasswordEnabled, setDiaryPasswordEnabled] = useState<boolean>(Boolean(settings.diaryPasswordEnabled));
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+
   const [githubTestState, setGithubTestState] = useState<{ loading: boolean; message: string; success?: boolean }>({
     loading: false,
     message: '',
@@ -39,6 +45,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   useEffect(() => {
     setForm(settings);
+    setDiaryPasswordEnabled(Boolean(settings.diaryPasswordEnabled));
+    setNewPassword('');
+    setConfirmPassword('');
+    setPasswordError('');
     setGithubTestState({ loading: false, message: '' });
     setGeminiTestState({ loading: false, message: '' });
   }, [settings, isOpen]);
@@ -69,9 +79,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(form);
+    setPasswordError('');
+
+    let updatedSettings: AppSettings = {
+      ...form,
+      diaryPasswordEnabled,
+    };
+
+    if (diaryPasswordEnabled) {
+      if (newPassword) {
+        if (newPassword !== confirmPassword) {
+          setPasswordError('確認用パスワードが一致しません');
+          return;
+        }
+        const hash = await hashPassword(newPassword.trim());
+        updatedSettings.diaryPasswordHash = hash;
+      } else if (!form.diaryPasswordHash) {
+        setPasswordError('パスワードを入力してください');
+        return;
+      }
+    } else {
+      updatedSettings.diaryPasswordHash = '';
+    }
+
+    onSave(updatedSettings);
     onClose();
   };
 
@@ -298,6 +331,73 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* 日記のパスワード保護設定 */}
+          <div className="space-y-3 p-3.5 rounded-xl bg-slate-800/40 border border-slate-750">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-medium text-slate-200">
+                <Lock className="w-4 h-4 text-indigo-400" />
+                <span>日記のパスワード保護</span>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={diaryPasswordEnabled}
+                  onChange={e => setDiaryPasswordEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-slate-700 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+              </label>
+            </div>
+
+            <p className="text-[10px] text-slate-400">
+              有効にすると、日記タブを開く際にパスワード認証が必要になり、プライバシーを保護できます。
+            </p>
+
+            {diaryPasswordEnabled && (
+              <div className="space-y-2.5 pt-2 border-t border-slate-750/70 animate-in fade-in duration-150">
+                {form.diaryPasswordHash && (
+                  <div className="text-[11px] text-emerald-400 flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" />
+                    <span>パスワード設定済み（変更する場合のみ下記を入力）</span>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                    {form.diaryPasswordHash ? '新しいパスワード' : 'パスワード（PINまたは英数字）'}
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="パスワードを入力"
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 focus:outline-hidden focus:border-indigo-500 font-mono text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                    パスワード確認
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="もう一度入力"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 focus:outline-hidden focus:border-indigo-500 font-mono text-xs"
+                  />
+                </div>
+
+                {passwordError && (
+                  <div className="p-2 rounded bg-rose-950/60 text-rose-300 border border-rose-800 text-[11px] flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{passwordError}</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* フッター */}

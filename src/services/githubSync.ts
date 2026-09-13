@@ -1,4 +1,5 @@
 import type { AppSettings, SentencePracticeLog, VocabDatabase, VocabItem } from '../types/vocab';
+import type { DiaryItem } from '../types/diary';
 import {
   getCachedSha,
   setCachedSha,
@@ -6,8 +7,12 @@ import {
   setCachedSentenceHistory,
   getCachedSentenceHistorySha,
   setCachedSentenceHistorySha,
+  setCachedDiary,
+  getCachedDiarySha,
+  setCachedDiarySha,
   getDeletedItemIds,
   getDeletedSentenceLogIds,
+  getDeletedDiaryIds,
 } from './storage';
 
 export function toBase64Utf8(str: string): string {
@@ -32,10 +37,12 @@ export function fromBase64Utf8(b64: string): string {
 export class GitHubSyncService {
   private currentSha: string | null = null;
   private currentSentenceSha: string | null = null;
+  private currentDiarySha: string | null = null;
 
   constructor() {
     this.currentSha = getCachedSha();
     this.currentSentenceSha = getCachedSentenceHistorySha();
+    this.currentDiarySha = getCachedDiarySha();
   }
 
   public getSha(): string | null {
@@ -57,6 +64,17 @@ export class GitHubSyncService {
     this.currentSentenceSha = sha;
     if (sha) {
       setCachedSentenceHistorySha(sha);
+    }
+  }
+
+  public getDiarySha(): string | null {
+    return this.currentDiarySha;
+  }
+
+  public setDiarySha(sha: string | null): void {
+    this.currentDiarySha = sha;
+    if (sha) {
+      setCachedDiarySha(sha);
     }
   }
 
@@ -377,6 +395,170 @@ export class GitHubSyncService {
     // 作成日時降順でソート
     return Array.from(map.values()).sort((a, b) => {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }
+
+  /**
+   * GitHubリポジトリから diary.json を取得する
+   */
+  public async fetchDiary(
+    settings: AppSettings
+  ): Promise<{ data: DiaryItem[]; sha: string | null }> {
+    const { githubToken, repoOwner, repoName, branch } = settings;
+
+    if (!githubToken || !repoOwner || !repoName) {
+      throw new Error('GitHub設定が未完了です。');
+    }
+
+    const filePath = 'diary.json';
+    const url = `https://api.github.com/repos/${encodeURIComponent(repoOwner.trim())}/${encodeURIComponent(
+      repoName.trim()
+    )}/contents/${filePath}?ref=${encodeURIComponent(branch.trim() || 'main')}&_t=${Date.now()}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.getHeaders(githubToken),
+      cache: 'no-store',
+    });
+
+    if (response.status === 404) {
+      this.setDiarySha(null);
+      setCachedDiary([]);
+      return { data: [], sha: null };
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.message || `GitHub取得エラー (${response.status} ${response.statusText})`
+      );
+    }
+
+    const data = await response.json();
+    const sha = data.sha as string;
+    this.setDiarySha(sha);
+
+    let parsedData: DiaryItem[] = [];
+    if (data.content) {
+      const jsonString = fromBase64Utf8(data.content);
+      parsedData = JSON.parse(jsonString);
+      if (!Array.isArray(parsedData)) {
+        parsedData = [];
+      }
+    }
+
+    setCachedDiary(parsedData, sha);
+    return { data: parsedData, sha };
+  }
+
+  /**
+   * diary.json を GitHub にコミット・プッシュする
+   */
+  public async pushDiary(
+    data: DiaryItem[],
+    settings: AppSettings,
+    commitMessage: string,
+    retryCount = 0
+  ): Promise<{ sha: string }> {
+    const { githubToken, repoOwner, repoName, branch } = settings;
+
+    if (!githubToken || !repoOwner || !repoName) {
+      throw new Error('GitHub設定が未完了です。');
+    }
+
+    const filePath = 'diary.json';
+    const url = `https://api.github.com/repos/${encodeURIComponent(repoOwner.trim())}/${encodeURIComponent(
+      repoName.trim()
+    )}/contents/${filePath}`;
+
+    const jsonString = JSON.stringify(data, null, 2);
+    const base64Content = toBase64Utf8(jsonString);
+
+    const payload: {
+      message: string;
+      content: string;
+      branch: string;
+      sha?: string;
+    } = {
+      message: commitMessage,
+      content: base64Content,
+      branch: branch.trim() || 'main',
+    };
+
+    const currentSha = this.currentDiarySha || getCachedDiarySha();
+    if (currentSha) {
+      payload.sha = currentSha;
+    }
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: this.getHeaders(githubToken),
+      body: JSON.stringify(payload),
+    });
+
+    if (response.status === 409) {
+      if (retryCount >= 2) {
+        throw new Error('日記データの競合が複数回発生しました。手動で同期してください。');
+      }
+
+      console.warn('409 Conflict in diary.json. Merging with remote...');
+      const remote = await this.fetchDiary(settings);
+      const merged = this.mergeDiary(data, remote.data);
+      return this.pushDiary(merged, settings, `${commitMessage} (auto-merge)`, retryCount + 1);
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.message || `GitHub保存エラー (${response.status} ${response.statusText})`
+      );
+    }
+
+    const result = await response.json();
+    const newSha = result.content.sha as string;
+    this.setDiarySha(newSha);
+    setCachedDiary(data, newSha);
+
+    return { sha: newSha };
+  }
+
+  /**
+   * ローカルとリモートの日記データをマージする（ID/日付ベース・削除済みIDは除外、新しいupdatedAt優先）
+   */
+  public mergeDiary(
+    local: DiaryItem[],
+    remote: DiaryItem[],
+    deletedIds?: Set<string>
+  ): DiaryItem[] {
+    const deleted = deletedIds ?? new Set(getDeletedDiaryIds());
+    const map = new Map<string, DiaryItem>();
+
+    for (const item of remote) {
+      if (deleted.has(item.id)) {
+        continue;
+      }
+      map.set(item.id, item);
+    }
+
+    for (const localItem of local) {
+      if (deleted.has(localItem.id)) {
+        continue;
+      }
+      const existing = map.get(localItem.id);
+      if (!existing) {
+        map.set(localItem.id, localItem);
+      } else {
+        const localUpdated = new Date(localItem.updatedAt || localItem.createdAt).getTime();
+        const remoteUpdated = new Date(existing.updatedAt || existing.createdAt).getTime();
+        if (localUpdated >= remoteUpdated) {
+          map.set(localItem.id, localItem);
+        }
+      }
+    }
+
+    // 日付降順（最新の日記が上）でソート
+    return Array.from(map.values()).sort((a, b) => {
+      return b.date.localeCompare(a.date);
     });
   }
 

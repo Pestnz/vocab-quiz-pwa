@@ -1,10 +1,13 @@
 import type { AppSettings, SentencePracticeLog, VocabDatabase } from '../types/vocab';
+import type { DiaryItem } from '../types/diary';
 
 const SETTINGS_KEY = 'vocab_app_settings';
 const LOCAL_VOCAB_CACHE_KEY = 'vocab_local_cache';
 const LOCAL_VOCAB_SHA_KEY = 'vocab_local_sha';
 const LOCAL_SENTENCE_HISTORY_KEY = 'sentence_history_local_cache';
 const LOCAL_SENTENCE_HISTORY_SHA_KEY = 'sentence_history_local_sha';
+const LOCAL_DIARY_CACHE_KEY = 'diary_local_cache';
+const LOCAL_DIARY_SHA_KEY = 'diary_local_sha';
 
 export const DEFAULT_SETTINGS: AppSettings = {
   githubToken: '',
@@ -14,6 +17,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   filePath: 'vocab.json',
   geminiApiKey: '',
   defaultLanguage: 'en',
+  diaryPasswordEnabled: false,
+  diaryPasswordHash: '',
 };
 
 export const getStoredSettings = (): AppSettings => {
@@ -153,4 +158,71 @@ export const addDeletedSentenceLogId = (id: string): void => {
     console.error('Failed to save deleted sentence log ID', e);
   }
 };
+
+export const getCachedDiary = (): DiaryItem[] => {
+  try {
+    const raw = localStorage.getItem(LOCAL_DIARY_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.error('Failed to read cached diary', e);
+    return [];
+  }
+};
+
+export const setCachedDiary = (data: DiaryItem[], sha?: string): void => {
+  try {
+    localStorage.setItem(LOCAL_DIARY_CACHE_KEY, JSON.stringify(data));
+    if (sha) {
+      localStorage.setItem(LOCAL_DIARY_SHA_KEY, sha);
+    }
+  } catch (e) {
+    console.error('Failed to cache diary', e);
+  }
+};
+
+export const getCachedDiarySha = (): string | null => {
+  return localStorage.getItem(LOCAL_DIARY_SHA_KEY);
+};
+
+export const setCachedDiarySha = (sha: string): void => {
+  localStorage.setItem(LOCAL_DIARY_SHA_KEY, sha);
+};
+
+// 削除済み日記IDの追跡（同期時のゾンビ復活防止ガード）
+const DELETED_DIARY_IDS_KEY = 'diary_deleted_ids';
+
+export const getDeletedDiaryIds = (): string[] => {
+  try {
+    const raw = localStorage.getItem(DELETED_DIARY_IDS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.error('Failed to read deleted diary IDs', e);
+    return [];
+  }
+};
+
+export const addDeletedDiaryId = (id: string): void => {
+  try {
+    const current = getDeletedDiaryIds();
+    const updated = [id, ...current.filter(existingId => existingId !== id)].slice(0, 200);
+    localStorage.setItem(DELETED_DIARY_IDS_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.error('Failed to save deleted diary ID', e);
+  }
+};
+
+export const removeDeletedDiaryId = (id: string): void => {
+  try {
+    const current = getDeletedDiaryIds();
+    const updated = current.filter(existingId => existingId !== id);
+    localStorage.setItem(DELETED_DIARY_IDS_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.error('Failed to remove deleted diary ID', e);
+  }
+};
+
 
