@@ -1,8 +1,15 @@
 import { GoogleGenAI } from '@google/genai';
 import type { DiaryCheckParams, DiaryCheckResult, DiarySuggestedVocab } from '../types/diary';
 
-const PRIMARY_MODEL = 'gemini-2.5-flash';
-const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+const PRIMARY_MODEL = 'gemini-2.0-flash';
+const FALLBACK_MODELS = [
+  'gemini-2.0-flash',
+  'gemini-1.5-flash-latest',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash-8b',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro-latest',
+];
 
 /**
  * ユーザーが外国語（英語・ポルトガル語）で書いた日記をGeminiで添削・アドバイス・おすすめ語彙抽出する
@@ -91,7 +98,7 @@ ${originalText.trim()}
     lastError = err as Error;
   }
 
-  // 2. REST API フォールバック
+  // 2. REST API フォールバック（各モデル順次試行）
   for (const model of FALLBACK_MODELS) {
     try {
       return await checkDiaryRest(prompt, apiKey, systemInstruction, model);
@@ -105,7 +112,7 @@ ${originalText.trim()}
 }
 
 /**
- * REST API フォールバック呼び出し
+ * REST API フォールバック呼び出し（v1beta と v1 の両エンドポイントを試行）
  */
 async function checkDiaryRest(
   prompt: string,
@@ -113,35 +120,52 @@ async function checkDiaryRest(
   systemInstruction: string,
   model: string
 ): Promise<DiaryCheckResult> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
+  const versions = ['v1beta', 'v1'];
+  let lastErr: Error | null = null;
 
-  const payload = {
-    contents: [{ parts: [{ text: prompt }] }],
-    systemInstruction: { parts: [{ text: systemInstruction }] },
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.3,
-    },
-  };
+  for (const ver of versions) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+      const payload = {
+        system_instruction: {
+          parts: [{ text: systemInstruction }],
+        },
+        contents: [
+          {
+            parts: [{ text: prompt }],
+          },
+        ],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: 0.3,
+        },
+      };
 
-  if (!res.ok) {
-    const errBody = await res.json().catch(() => ({}));
-    throw new Error(errBody.error?.message || `HTTP ${res.status}: ${res.statusText}`);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error?.message || `HTTP ${res.status}: ${res.statusText}`);
+      }
+
+      const data = await res.json();
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!rawText) {
+        throw new Error('Geminiから有効な添削応答が得られませんでした。');
+      }
+
+      return parseAndSanitizeDiaryResult(rawText);
+    } catch (err: unknown) {
+      lastErr = err as Error;
+    }
   }
 
-  const data = await res.json();
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  if (!rawText) {
-    throw new Error('Geminiから有効な添削応答が得られませんでした。');
-  }
-
-  return parseAndSanitizeDiaryResult(rawText);
+  throw lastErr || new Error(`モデル ${model} での添削に失敗しました。`);
 }
 
 /**

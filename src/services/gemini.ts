@@ -1,9 +1,16 @@
 import { GoogleGenAI } from '@google/genai';
 import type { VocabAnalysisResult } from '../types/vocab';
 
-// 最新推奨モデル: gemini-3.6-flash
-const PRIMARY_MODEL = 'gemini-3.6-flash';
-const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
+// 最新推奨モデル: gemini-2.0-flash
+const PRIMARY_MODEL = 'gemini-2.0-flash';
+const FALLBACK_MODELS = [
+  'gemini-2.0-flash',
+  'gemini-1.5-flash-latest',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash-8b',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro-latest',
+];
 const BATCH_CHUNK_SIZE = 15; // 1回あたりの最大安全チャンク数
 
 /**
@@ -146,41 +153,52 @@ async function processBatchChunkRest(
   modelName: string,
   originalItems: string[]
 ): Promise<VocabAnalysisResult[]> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
-  
-  const payload = {
-    system_instruction: {
-      parts: [{ text: systemInstruction }]
-    },
-    contents: [
-      {
-        parts: [{ text: prompt }]
+  const versions = ['v1beta', 'v1'];
+  let lastErr: Error | null = null;
+
+  for (const ver of versions) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/${ver}/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
+      
+      const payload = {
+        system_instruction: {
+          parts: [{ text: systemInstruction }]
+        },
+        contents: [
+          {
+            parts: [{ text: prompt }]
+          }
+        ],
+        generationConfig: {
+          responseMimeType: 'application/json',
+        }
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => ({}));
+        const message = errorBody?.error?.message || `APIエラー (${res.status} ${res.statusText})`;
+        throw new Error(message);
       }
-    ],
-    generationConfig: {
-      responseMimeType: 'application/json',
+
+      const resData = await res.json();
+      const text = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+        throw new Error('Gemini API からの応答が空でした。');
+      }
+
+      return parseAndSanitizeBatchResult(text, originalItems, preferredLanguage);
+    } catch (e: unknown) {
+      lastErr = e as Error;
     }
-  };
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    const errorBody = await res.json().catch(() => ({}));
-    const message = errorBody?.error?.message || `APIエラー (${res.status} ${res.statusText})`;
-    throw new Error(message);
   }
 
-  const resData = await res.json();
-  const text = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error('Gemini API からの応答が空でした。');
-  }
-
-  return parseAndSanitizeBatchResult(text, originalItems, preferredLanguage);
+  throw lastErr || new Error(`モデル ${modelName} の呼び出しに失敗しました。`);
 }
 
 function parseAndSanitizeBatchResult(
