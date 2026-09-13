@@ -85,6 +85,8 @@ ${originalText.trim()}
       config: {
         systemInstruction,
         responseMimeType: 'application/json',
+        maxOutputTokens: 8192,
+        temperature: 0.3,
       },
     });
 
@@ -138,7 +140,14 @@ async function checkDiaryRest(
         generationConfig: {
           responseMimeType: 'application/json',
           temperature: 0.3,
+          maxOutputTokens: 8192,
         },
+        safetySettings: [
+          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+        ],
       };
 
       const res = await fetch(url, {
@@ -153,7 +162,12 @@ async function checkDiaryRest(
       }
 
       const data = await res.json();
-      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      const candidate = data.candidates?.[0];
+      if (candidate?.finishReason === 'SAFETY') {
+        throw new Error('セーフティフィルターにより添削がブロックされました。');
+      }
+
+      const rawText = candidate?.content?.parts?.[0]?.text?.trim();
       if (!rawText) {
         throw new Error('Geminiから有効な添削応答が得られませんでした。');
       }
