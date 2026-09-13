@@ -1,13 +1,11 @@
 import { GoogleGenAI } from '@google/genai';
 import type { Language, SentenceCheckResult } from '../types/vocab';
 
-const PRIMARY_MODEL = 'gemini-2.0-flash';
+const PRIMARY_MODEL = 'gemini-3.6-flash';
 const FALLBACK_MODELS = [
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
-  'gemini-1.5-flash-latest',
-  'gemini-1.5-flash-8b',
-  'gemini-1.5-pro-latest',
+  'gemini-3.6-flash',
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
 ];
 
 export interface CheckSentenceParams {
