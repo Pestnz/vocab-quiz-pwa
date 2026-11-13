@@ -34,6 +34,8 @@ import { MetaPanel } from './MetaPanel';
 import { SectionsEditor } from './SectionsEditor';
 import { AiStatusPanel } from './AiStatusPanel';
 import { planFor } from '../../services/aiRouter';
+import { FILE_MAX_BYTES, FILE_WARN_BYTES, setCrop, setDocBytes, useDocBytes } from '../../services/cropStore';
+import { docToFile } from '../../services/explanationSync';
 import { countMissingReasons } from '../../services/explainSections';
 import { usePdfPopout } from './usePdfPopout';
 import type { PopoutPatch } from '../../services/explainPopout';
@@ -83,6 +85,7 @@ export const ExplainView: React.FC = () => {
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiTick, setAiTick] = useState(0); // AI設定を閉じたときに、残り回数の表示を更新する
 
+  const fileBytes = useDocBytes();
   const docRef = useRef<LocalExplainDoc | null>(null);
   const docsRef = useRef<LocalExplainDoc[]>([]);
   const dirtyRef = useRef(false);
@@ -96,6 +99,21 @@ export const ExplainView: React.FC = () => {
   useEffect(() => {
     docsRef.current = docs;
   }, [docs]);
+
+  // GitHubに送る解説ファイルの大きさ(画像を貼る前の「1MBを超えないか」の確認と、画面の表示に使う)。
+  // 文字を打つたびに数えると重いので、少し待ってから数える
+  useEffect(() => {
+    if (!current) {
+      setDocBytes(0);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setDocBytes(new TextEncoder().encode(JSON.stringify(docToFile(current))).length);
+    }, 500);
+    return () => window.clearTimeout(timer);
+    // 表示状態(ページ位置など)の変更では数え直さない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id, current?.content, current?.sections, current?.layout, current?.title]);
 
   // ---- 保存(この端末の IndexedDB へ) ----
   const flush = useCallback(async () => {
@@ -537,6 +555,7 @@ export const ExplainView: React.FC = () => {
       onSpreadSideChange={(s: SpreadSide) => patchDoc({ spreadSide: s })}
       onSpreadRatioChange={(r) => patchDoc({ spreadRatio: r })}
       onPickFile={handlePickFile}
+      onCrop={setCrop}
     />
   ) : null;
 
@@ -681,6 +700,14 @@ export const ExplainView: React.FC = () => {
             AI残り 読取{planFor('ocr').models.find((m) => m.model === planFor('ocr').next)?.remaining ?? 0}・解説
             {planFor('translate').models.find((m) => m.model === planFor('translate').next)?.remaining ?? 0}
           </button>
+          {view === 'work' && current && (
+            <span
+              className={fileBytes >= FILE_MAX_BYTES ? 'text-rose-400' : fileBytes >= FILE_WARN_BYTES ? 'text-amber-400' : 'text-slate-500'}
+              title="GitHubに送る解説ファイルの大きさ。約1MBを超えると同期できません(画像が主な原因です)"
+            >
+              ファイル {fileBytes >= 1024 ? `${Math.round(fileBytes / 1024)}KB` : `${fileBytes}B`} / 約1000KB
+            </span>
+          )}
           {view === 'work' && current && saveBadge}
           {syncBadge}
           {syncButton}

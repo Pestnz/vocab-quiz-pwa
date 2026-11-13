@@ -25,5 +25,49 @@ export const TeacherNote = TiptapNode.create({
   ],
 });
 
+/**
+ * PDFの切り抜き画像(データURLで本文に埋め込む)。
+ * 安全のため、外部のURLは受け付けず、data:image/ だけを画像として読む。
+ * width / height は元の画像の大きさ(読み込み前でも、ページの割り付けが狂わないようにする)、
+ * widthPct は本文の幅に対する表示の大きさ(%)。
+ */
+export const ExplainImage = TiptapNode.create({
+  name: 'explainImage',
+  group: 'block',
+  atom: true,
+  draggable: true,
+  selectable: true,
+  addAttributes() {
+    return {
+      src: { default: null },
+      alt: { default: 'PDFの切り抜き' },
+      width: { default: null, parseHTML: (el: HTMLElement) => Number(el.getAttribute('width')) || null },
+      height: { default: null, parseHTML: (el: HTMLElement) => Number(el.getAttribute('height')) || null },
+      widthPct: { default: 100, parseHTML: (el: HTMLElement) => Number(el.getAttribute('data-w')) || 100 },
+    };
+  },
+  parseHTML: () => [{ tag: 'img[src^="data:image/"]' }],
+  renderHTML: ({ HTMLAttributes }) => {
+    const { src, alt, width, height, widthPct } = HTMLAttributes as Record<string, unknown>;
+    const pct = Number(widthPct) || 100;
+    const natural = Number(width) || 0;
+    return [
+      'img',
+      {
+        src: String(src ?? ''),
+        alt: String(alt ?? ''),
+        ...(natural ? { width: String(natural) } : {}),
+        ...(Number(height) ? { height: String(Number(height)) } : {}),
+        'data-w': String(pct),
+        // 原寸より大きくは引き伸ばさない
+        style: `width:${pct}%;${natural ? `max-width:${natural}px;` : ''}height:auto`,
+      },
+    ];
+  },
+});
+
 /** エディター本体と、印刷用のHTML生成の両方で同じものを使う */
-export const explainExtensions = [StarterKit, PageBreak, TeacherNote];
+export const explainExtensions = [StarterKit, PageBreak, TeacherNote, ExplainImage];
+
+/** 設問の解説・選択肢の理由の小さな入力欄用(画像は貼れるが、改ページ・講師メモは使わない) */
+export const miniExtensions = [StarterKit, ExplainImage];

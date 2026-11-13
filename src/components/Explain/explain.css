@@ -41,6 +41,23 @@
 
 .explain-page-body .ProseMirror { outline: none; }
 
+/* ---- PDFの切り抜き画像(データURLで埋め込み)。幅はインラインの width(%)と max-width(原寸)で決まる ---- */
+.explain-paper img,
+.explain-page-body img {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  break-inside: avoid;
+}
+.explain-paper img.ProseMirror-selectednode,
+.explain-page-body img.ProseMirror-selectednode {
+  outline: 3px solid #0ea5e9;
+}
+.explain-page-body .ex-q-exp img,
+.explain-page-body .ex-reason img {
+  margin: 0.2em 0;
+}
+
 /* ---- 印刷ページの本文: ブロックの間隔は margin-bottom で統一(測定とレイアウトを一致させる) ---- */
 .explain-page-body > * {
   margin: 0 0 0.6em;

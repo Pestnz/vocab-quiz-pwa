@@ -100,6 +100,8 @@ export async function paginate(html: string, layout: PrintLayout, mode: PrintMod
   });
   host.innerHTML = blocks.map((b) => b.html).join('');
   document.body.appendChild(host);
+  // 画像は読み込み(デコード)が終わってから高さを測る。先に測ると、ページの割り付けがずれる
+  await Promise.all(Array.from(host.querySelectorAll('img')).map((img) => img.decode().catch(() => undefined)));
   const heights = Array.from(host.children).map((el) => {
     const mb = parseFloat(getComputedStyle(el).marginBottom || '0') || 0;
     return (el as HTMLElement).offsetHeight + mb;

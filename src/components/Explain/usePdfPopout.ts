@@ -6,6 +6,7 @@ import {
   popoutUrl,
 } from '../../services/explainPopout';
 import type { MainToPopout, PopoutPatch, PopoutState, PopoutToMain } from '../../services/explainPopout';
+import { setCrop } from '../../services/cropStore';
 
 const toState = (d: LocalExplainDoc): PopoutState => ({
   docId: d.id,
@@ -75,6 +76,7 @@ export function usePdfPopout(
     ch.onmessage = (e: MessageEvent<PopoutToMain>) => {
       if (e.data.type === 'ready') sendState();
       else if (e.data.type === 'patch') onPatchRef.current(e.data.docId, e.data.patch);
+      else if (e.data.type === 'crop') setCrop(e.data.image); // 別ウィンドウで切り抜いた画像を、こちらの置き場へ
     };
     setOpen(true);
     return true;

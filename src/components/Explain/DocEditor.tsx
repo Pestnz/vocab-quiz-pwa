@@ -5,6 +5,7 @@ import { Bold, Italic, Underline, List, ListOrdered, Quote, Heading2, Heading3, 
 import type { PrintLayout } from '../../types/explain';
 import { explainExtensions } from '../../services/explainExtensions';
 import { MM_TO_PX } from '../../services/explainLayout';
+import { ImageSizeButtons, PasteCropButton } from './PasteCropButton';
 import './explain.css';
 
 interface DocEditorProps {
@@ -36,6 +37,7 @@ export const DocEditor: React.FC<DocEditorProps> = ({ initialContent, layout, on
       ordered: ed?.isActive('orderedList') ?? false,
       quote: ed?.isActive('blockquote') ?? false,
       teacherNote: ed?.isActive('teacherNote') ?? false,
+      imagePct: ed?.isActive('explainImage') ? Number(ed.getAttributes('explainImage').widthPct) || 100 : null,
       canUndo: ed?.can().undo() ?? false,
       canRedo: ed?.can().redo() ?? false,
     }),
@@ -108,6 +110,17 @@ export const DocEditor: React.FC<DocEditorProps> = ({ initialContent, layout, on
         >
           <StickyNote className="w-4 h-4" />
         </button>
+        <span className="mx-1 h-4 w-px bg-slate-700" />
+        <PasteCropButton
+          onInsert={(img) =>
+            editor
+              .chain()
+              .focus()
+              .insertContent({ type: 'explainImage', attrs: { src: img.dataUrl, width: img.width, height: img.height } })
+              .run()
+          }
+        />
+        <ImageSizeButtons current={active.imagePct} onChange={(pct) => editor.chain().focus().updateAttributes('explainImage', { widthPct: pct }).run()} />
         <span className="ml-auto text-[10px] text-slate-500">赤線 = A4の1ページの目安(正確な改ページは印刷プレビューで確認)</span>
       </div>
 

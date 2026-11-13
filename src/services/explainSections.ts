@@ -137,10 +137,11 @@ export const bySectionOrder = (a: { order: number }, b: { order: number }): numb
 
 // ---------------- 中身のチェック ----------------
 
-/** リッチテキストに、文字が1つも入っていないか */
+/** リッチテキストに、文字も画像も1つも入っていないか(切り抜き画像だけの解説・理由も「入力あり」とみなす) */
 export function isRichEmpty(doc: JSONContent | null | undefined): boolean {
   if (!doc) return true;
   const walk = (n: JSONContent): boolean => {
+    if (n.type === 'explainImage' && typeof n.attrs?.src === 'string' && n.attrs.src !== '') return true;
     if (typeof n.text === 'string' && n.text.trim() !== '') return true;
     return (n.content ?? []).some(walk);
   };

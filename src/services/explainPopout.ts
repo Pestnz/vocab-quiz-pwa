@@ -1,4 +1,5 @@
 import type { SpreadSide } from '../types/explain';
+import type { CropImage } from './imageCompress';
 
 /**
  * PDFを別ウィンドウに出す機能の、2つのウィンドウ間のやり取り。
@@ -45,7 +46,10 @@ export interface PopoutPatch {
 }
 
 export type MainToPopout = { type: 'state'; state: PopoutState } | { type: 'heartbeat' };
-export type PopoutToMain = { type: 'ready' } | { type: 'patch'; docId: string; patch: PopoutPatch };
+export type PopoutToMain =
+  | { type: 'ready' }
+  | { type: 'patch'; docId: string; patch: PopoutPatch }
+  | { type: 'crop'; image: CropImage }; // 別ウィンドウで切り抜いた画像(元のウィンドウの「切り抜きを貼り付け」で使う)
 
 /** 元のウィンドウからの合図(心拍)がこの時間ないと、接続が切れたとみなす */
 export const HEARTBEAT_INTERVAL_MS = 2000;

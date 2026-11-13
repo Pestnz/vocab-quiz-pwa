@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useEditor, EditorContent, useEditorState } from '@tiptap/react';
 import type { JSONContent } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
 import { Bold, Italic, Underline, List, ListOrdered } from 'lucide-react';
 import { cachedHtml } from '../../services/explainPaginate';
+import { miniExtensions } from '../../services/explainExtensions';
+import { ImageSizeButtons, PasteCropButton } from './PasteCropButton';
 import './explain.css';
 
 interface RichFieldProps {
@@ -19,7 +20,7 @@ const MiniEditor: React.FC<{
   onDone: () => void;
 }> = ({ value, onChange, onDone }) => {
   const editor = useEditor({
-    extensions: [StarterKit],
+    extensions: miniExtensions,
     content: value ?? '',
     autofocus: 'end',
     onUpdate: ({ editor: ed }) => onChange(ed.getJSON()),
@@ -33,6 +34,7 @@ const MiniEditor: React.FC<{
       underline: ed?.isActive('underline') ?? false,
       bullet: ed?.isActive('bulletList') ?? false,
       ordered: ed?.isActive('orderedList') ?? false,
+      imagePct: ed?.isActive('explainImage') ? Number(ed.getAttributes('explainImage').widthPct) || 100 : null,
     }),
   });
   if (!editor || !active) return null;
@@ -51,7 +53,7 @@ const MiniEditor: React.FC<{
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onDone();
       }}
     >
-      <div className="absolute left-0 right-0 -top-7 z-10 flex items-center gap-0.5 px-1 py-0.5 border border-slate-300 bg-slate-100 rounded shadow">
+      <div className="absolute left-0 right-0 bottom-full mb-1 z-10 flex flex-wrap items-center gap-0.5 px-1 py-0.5 border border-slate-300 bg-slate-100 rounded shadow">
         <button className={tb(active.bold)} onMouseDown={keep} onClick={() => editor.chain().focus().toggleBold().run()} title="太字">
           <Bold className="w-3.5 h-3.5" />
         </button>
@@ -67,6 +69,22 @@ const MiniEditor: React.FC<{
         <button className={tb(active.ordered)} onMouseDown={keep} onClick={() => editor.chain().focus().toggleOrderedList().run()} title="番号付き">
           <ListOrdered className="w-3.5 h-3.5" />
         </button>
+        <PasteCropButton
+          keepFocus
+          className="flex items-center gap-1 px-1 py-0.5 rounded text-[11px] cursor-pointer disabled:opacity-30 text-sky-700 hover:bg-slate-200"
+          onInsert={(img) =>
+            editor
+              .chain()
+              .focus()
+              .insertContent({ type: 'explainImage', attrs: { src: img.dataUrl, width: img.width, height: img.height } })
+              .run()
+          }
+        />
+        <ImageSizeButtons
+          keepFocus
+          current={active.imagePct}
+          onChange={(pct) => editor.chain().focus().updateAttributes('explainImage', { widthPct: pct }).run()}
+        />
         <span className="ml-auto text-[10px] text-slate-400 pr-1">枠の外をクリックで確定</span>
       </div>
       <div className="explain-page-body px-2 py-1 min-h-[2.25rem] !bg-white">

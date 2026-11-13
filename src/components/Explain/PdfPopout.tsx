@@ -162,6 +162,10 @@ export const PdfPopout: React.FC = () => {
           onSpreadSideChange={(s: SpreadSide) => update({ spreadSide: s }, { spreadSide: s })}
           onSpreadRatioChange={(r) => update({ spreadRatio: r }, { spreadRatio: r })}
           onPickFile={() => fileInputRef.current?.click()}
+          onCrop={(image) => {
+            const msg: PopoutToMain = { type: 'crop', image };
+            channelRef.current?.postMessage(msg);
+          }}
         />
       </div>
     </div>
