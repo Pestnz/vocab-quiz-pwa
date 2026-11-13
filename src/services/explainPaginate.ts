@@ -28,6 +28,18 @@ export function docToHtml(content: JSONContent | null): string {
   return html;
 }
 
+const htmlCache = new WeakMap<object, string>();
+
+/** 同じ内容(同じオブジェクト)は、HTMLを作り直さない。入力欄の表示用 */
+export function cachedHtml(content: JSONContent | null): string {
+  if (!content) return '';
+  const hit = htmlCache.get(content);
+  if (hit !== undefined) return hit;
+  const html = docToHtml(content);
+  htmlCache.set(content, html);
+  return html;
+}
+
 function toItems(html: string, mode: PrintMode): Item[] {
   const tpl = document.createElement('template');
   tpl.innerHTML = html;

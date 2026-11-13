@@ -22,6 +22,8 @@ import {
   saveDoc,
 } from './explainDb';
 import { isExamStatus } from './explainMeta';
+import { normalizeSections } from './explainSections';
+import { mergeDocs } from './explainMerge';
 
 /**
  * 解説ファイルの GitHub 同期。
@@ -40,7 +42,8 @@ export interface SyncSummary {
   pushed: number;
   pulled: number;
   deleted: number;
-  conflicts: number;
+  conflicts: number; // 同じ設問などを両方で編集した件数(競合コピーを作成)
+  merged: number; // 重ならない編集を、自動で統合した件数
   warnings: string[];
   errors: string[];
 }
@@ -153,8 +156,6 @@ function docToRefs(doc: LocalExplainDoc): PdfRef[] {
 
 /** 端末の解説 → GitHub のファイル。remote があれば、こちらが知らない項目(将来の sections など)を保つ */
 export function docToFile(doc: LocalExplainDoc, remote?: Partial<ExplainFile> | null): ExplainFile {
-  const remoteSections = remote?.sections;
-  const remoteDeleted = remote?.deletedSectionIds;
   return {
     ...(remote ?? {}),
     schemaVersion: 1,
@@ -168,10 +169,11 @@ export function docToFile(doc: LocalExplainDoc, remote?: Partial<ExplainFile> | 
     pdfRefs: docToRefs(doc),
     content: doc.content,
     layout: doc.layout,
-    sections: Array.isArray(remoteSections) ? remoteSections : [],
-    deletedSectionIds: Array.isArray(remoteDeleted) ? remoteDeleted : [],
+    sections: doc.sections,
+    deletedSectionIds: doc.deletedSectionIds,
     createdAt: doc.createdAt,
     updatedAt: doc.syncUpdatedAt,
+    metaUpdatedAt: doc.metaUpdatedAt,
   };
 }
 
@@ -195,9 +197,12 @@ export function fileToDoc(file: ExplainFile, sha: string, existing?: LocalExplai
     pdfFileName: ref?.fileName ?? null,
     pdfFileSize: ref?.fileSize ?? null,
     spreadRatio: ref?.spreadSplitRatio ?? 0.5,
+    sections: normalizeSections(file.sections),
+    deletedSectionIds: Array.isArray(file.deletedSectionIds) ? file.deletedSectionIds : [],
     createdAt: file.createdAt,
     updatedAt: now,
     syncUpdatedAt: file.updatedAt,
+    metaUpdatedAt: file.metaUpdatedAt ?? file.updatedAt,
     baseUpdatedAt: file.updatedAt,
     remoteSha: sha,
     lastSyncedAt: now,
@@ -281,7 +286,7 @@ export async function syncExplanations(): Promise<SyncSummary> {
     throw new Error('GitHub設定(トークン・所有者・リポジトリ名)が未完了です。設定画面で入力してください。');
   }
 
-  const summary: SyncSummary = { pushed: 0, pulled: 0, deleted: 0, conflicts: 0, warnings: [], errors: [] };
+  const summary: SyncSummary = { pushed: 0, pulled: 0, deleted: 0, conflicts: 0, merged: 0, warnings: [], errors: [] };
 
   const remoteIdx = await getJson<Partial<ExplainIndex>>(settings, INDEX_PATH);
   const remoteIndex = normalizeIndex(remoteIdx?.json);
@@ -373,22 +378,22 @@ export async function syncExplanations(): Promise<SyncSummary> {
         continue;
       }
 
-      // 両方で変更 → 競合。新しい方を採用し、古い方は競合コピーとして残す
+      // 両方で変更 → 設問・大問の単位で統合する。重なる編集(同じ設問など)だけが競合で、
+      // 新しい方を採用し、負けた側の内容は「競合コピー」として別の解説に残す
       const file = await getJson<ExplainFile>(settings, item.path || filePathOf(item.id));
       if (!file) {
         await pushDoc(settings, local, summary, nextItems);
         continue;
       }
-      summary.conflicts++;
-      if (ts(R) > ts(L)) {
-        await saveDoc(conflictCopyOf(local, '端末側'));
-        await saveDoc(fileToDoc(file.json, file.sha, local));
-        summary.pulled++;
-      } else {
-        const remoteAsDoc = fileToDoc(file.json, file.sha);
-        await saveDoc(conflictCopyOf(remoteAsDoc, 'GitHub側'));
-        await pushDoc(settings, local, summary, nextItems, file);
-      }
+      const remoteDoc = fileToDoc(file.json, file.sha);
+      const merge = mergeDocs(local, remoteDoc, base);
+      if (merge.lostLocal) await saveDoc(conflictCopyOf(local, '端末側'));
+      if (merge.lostRemote) await saveDoc(conflictCopyOf(remoteDoc, 'GitHub側'));
+      if (merge.conflicts > 0) summary.conflicts++;
+      else summary.merged++;
+      // 統合した結果は、どちらよりも新しい版として GitHub に送る
+      const stamp = new Date(Math.max(Date.now(), ts(R) + 1, ts(L) + 1)).toISOString();
+      await pushDoc(settings, { ...local, ...merge.fields, updatedAt: stamp, syncUpdatedAt: stamp }, summary, nextItems, file);
     } catch (e) {
       summary.errors.push(`「${local?.title || item.title || item.id}」の同期に失敗: ${(e as Error).message}`);
     }

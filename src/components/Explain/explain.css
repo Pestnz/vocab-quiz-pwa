@@ -39,6 +39,8 @@
   margin-top: 0.6em;
 }
 
+.explain-page-body .ProseMirror { outline: none; }
+
 /* ---- 印刷ページの本文: ブロックの間隔は margin-bottom で統一(測定とレイアウトを一致させる) ---- */
 .explain-page-body > * {
   margin: 0 0 0.6em;
@@ -63,6 +65,30 @@
 .explain-paper em, .explain-page-body em { font-style: italic; }
 .explain-paper u, .explain-page-body u { text-decoration: underline; }
 .explain-paper li > p, .explain-page-body li > p { margin: 0; }
+
+/* ---- 設問(解答解説)。1設問 = 1ブロックで、ページの途中で切れない ---- */
+.explain-page-body .ex-q {
+  border: 1px solid #aaa;
+  padding: 0.4em 0.7em;
+  break-inside: avoid;
+}
+.explain-page-body .ex-q > * { margin: 0; }
+.explain-page-body .ex-q > * + * { margin-top: 0.4em; }
+.explain-page-body .ex-q-head { font-weight: 700; }
+.explain-page-body .ex-q-ans { margin-left: 0.8em; padding: 0 0.4em; border: 1px solid #111; }
+.explain-page-body .ex-q-pt { margin-left: 0.5em; font-weight: 400; font-size: 0.9em; }
+.explain-page-body .ex-q-prompt { font-size: 0.92em; color: #333; }
+.explain-page-body .ex-q-exp > * { margin: 0 0 0.4em; }
+.explain-page-body .ex-q-exp > *:last-child { margin-bottom: 0; }
+.explain-page-body .ex-choices { width: 100%; border-collapse: collapse; }
+.explain-page-body .ex-choices td { border: 1px solid #bbb; padding: 0.15em 0.4em; vertical-align: top; }
+.explain-page-body .ex-choices td > * { margin: 0; }
+.explain-page-body .ex-mark { width: 2em; text-align: center; font-weight: 700; }
+.explain-page-body .ex-lab { width: 2.6em; text-align: center; }
+.explain-page-body .ex-empty { color: #b91c1c; font-size: 0.85em; }
+.explain-page-body .ex-model { border-left: 3px solid #2563eb; padding-left: 0.6em; }
+.explain-page-body .ex-model p { margin: 0.2em 0 0; }
+.explain-page-body .ex-scoring { font-size: 0.92em; }
 
 /* ---- 講師メモ(生徒配布用には印刷されない) ---- */
 .explain-paper [data-teacher-note],

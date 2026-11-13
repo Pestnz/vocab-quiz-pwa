@@ -15,6 +15,7 @@ import {
 import type { LocalExplainDoc, PrintLayout, SpreadSide } from '../../types/explain';
 import { normalizeLayout } from '../../services/explainLayout';
 import {
+  META_KEYS,
   SYNCED_KEYS,
   createEmptyDoc,
   deleteDocWithTombstone,
@@ -30,6 +31,8 @@ import { DocEditor } from './DocEditor';
 import { PrintPreview } from './PrintPreview';
 import { ExplainLibrary } from './ExplainLibrary';
 import { MetaPanel } from './MetaPanel';
+import { SectionsEditor } from './SectionsEditor';
+import { countMissingReasons } from '../../services/explainSections';
 import { usePdfPopout } from './usePdfPopout';
 import type { PopoutPatch } from '../../services/explainPopout';
 
@@ -54,6 +57,7 @@ function summarize(s: SyncSummary): string {
   if (s.pushed) parts.push(`送信${s.pushed}`);
   if (s.pulled) parts.push(`取得${s.pulled}`);
   if (s.deleted) parts.push(`削除${s.deleted}`);
+  if (s.merged) parts.push(`自動統合${s.merged}`);
   if (s.conflicts) parts.push(`競合${s.conflicts}(競合コピーを作成)`);
   return parts.length ? parts.join(' / ') : '変更なし';
 }
@@ -119,7 +123,14 @@ export const ExplainView: React.FC = () => {
       if (!prev) return;
       const now = new Date().toISOString();
       const touchesSynced = SYNCED_KEYS.some((k) => k in patch);
-      const next = { ...prev, ...patch, updatedAt: now, ...(touchesSynced ? { syncUpdatedAt: now } : {}) };
+      const touchesMeta = META_KEYS.some((k) => k in patch);
+      const next = {
+        ...prev,
+        ...patch,
+        updatedAt: now,
+        ...(touchesSynced ? { syncUpdatedAt: now } : {}),
+        ...(touchesMeta ? { metaUpdatedAt: now } : {}),
+      };
       docRef.current = next;
       dirtyRef.current = true;
       setCurrent(next);
@@ -527,13 +538,52 @@ export const ExplainView: React.FC = () => {
 
   const layout = normalizeLayout(current?.layout);
 
+  const editorMode = current?.editorMode ?? 'free';
+  const missingReasons = current ? countMissingReasons(current.sections) : 0;
+
   const editorPane = current ? (
-    <DocEditor
-      key={`${current.id}:${editorKey}`}
-      initialContent={current.content}
-      layout={layout}
-      onChange={handleEditorChange}
-    />
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex border-b border-slate-800 bg-slate-900 text-xs shrink-0">
+        {(
+          [
+            ['free', '自由記述'],
+            ['sections', `大問(${current.sections.length})`],
+          ] as const
+        ).map(([mode, label]) => (
+          <button
+            key={mode}
+            onClick={() => patchDoc({ editorMode: mode })}
+            className={`px-4 py-2 cursor-pointer flex items-center gap-1 ${
+              editorMode === mode ? 'text-emerald-400 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {label}
+            {mode === 'sections' && missingReasons > 0 && (
+              <span className="px-1 rounded bg-amber-500 text-slate-900 text-[10px] font-bold" title="理由が未入力の選択肢">
+                {missingReasons}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 min-h-0">
+        {editorMode === 'free' ? (
+          <DocEditor
+            key={`${current.id}:${editorKey}`}
+            initialContent={current.content}
+            layout={layout}
+            onChange={handleEditorChange}
+          />
+        ) : (
+          <SectionsEditor
+            key={`${current.id}:${editorKey}`}
+            sections={current.sections}
+            deletedSectionIds={current.deletedSectionIds}
+            onChange={(next) => patchDoc(next)}
+          />
+        )}
+      </div>
+    </div>
   ) : null;
 
   const syncButton = (

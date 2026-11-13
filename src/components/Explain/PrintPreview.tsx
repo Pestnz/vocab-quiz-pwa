@@ -2,8 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Printer, X, Settings2, AlertTriangle } from 'lucide-react';
 import type { LocalExplainDoc, PrintLayout } from '../../types/explain';
-import { docToHtml, paginate } from '../../services/explainPaginate';
+import { paginate } from '../../services/explainPaginate';
 import type { PaginateResult, PrintMode } from '../../services/explainPaginate';
+import { buildPrintHtml } from '../../services/explainPrintHtml';
+import type { PrintScope } from '../../services/explainPrintHtml';
+import { countMissingReasons } from '../../services/explainSections';
 import { DEFAULT_PRINT_LAYOUT, normalizeLayout } from '../../services/explainLayout';
 import './explain.css';
 
@@ -32,6 +35,8 @@ const ZOOMS = [0.5, 0.7, 0.85, 1] as const;
 
 export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayoutChange, onClose }) => {
   const [mode, setMode] = useState<PrintMode>('teacher');
+  // 自由記述だけの解説は「自由記述のみ」、大問があれば「すべて」から始める
+  const [scope, setScope] = useState<PrintScope>('all');
   const [zoom, setZoom] = useState<number>(0.85);
   const [showSettings, setShowSettings] = useState(false);
   const [result, setResult] = useState<PaginateResult | null>(null);
@@ -61,7 +66,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
-        const r = await paginate(docToHtml(doc.content), layout, mode);
+        const r = await paginate(buildPrintHtml({ ...doc, content: doc.content, sections: doc.sections }, scope), layout, mode);
         if (!cancelled) setResult(r);
       } catch (e) {
         console.error('Failed to paginate', e);
@@ -71,7 +76,11 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [doc.content, layout, mode]);
+    // doc 全体ではなく、印刷に関わる項目だけを監視する(ページ位置の変更などで再計算しない)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc.content, doc.sections, layout, mode, scope]);
+
+  const missingReasons = scope === 'free' ? 0 : countMissingReasons(doc.sections);
 
   const headerText = layout.headerText.trim() || doc.title;
   const pageCount = result?.pages.length ?? 0;
@@ -116,6 +125,17 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
             >
               <option value="teacher">講師用(講師メモを含む)</option>
               <option value="student">生徒配布用(講師メモを除く)</option>
+            </select>
+
+            <select
+              value={scope}
+              onChange={(e) => setScope(e.target.value as PrintScope)}
+              className="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-md px-2 py-1.5"
+              aria-label="印刷する範囲"
+            >
+              <option value="all">すべて(自由記述+解答解説)</option>
+              <option value="answers">解答解説(大問)のみ</option>
+              <option value="free">自由記述のみ</option>
             </select>
 
             <select
@@ -186,6 +206,12 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
 
           <div className="px-3 pb-2 text-[11px] text-slate-500">
             印刷ダイアログでは、用紙「A4」・倍率「100%」・余白「なし」・「背景のグラフィック」オンにすると、この表示どおりに出力されます。
+            {missingReasons > 0 && (
+              <span className="ml-2 inline-flex items-center gap-1 text-amber-400">
+                <AlertTriangle className="w-3 h-3" />
+                理由が未入力の選択肢が {missingReasons} 件あります(印刷では「理由 未入力」と出ます)。
+              </span>
+            )}
             {result && result.overflowCount > 0 && (
               <span className="ml-2 inline-flex items-center gap-1 text-amber-400">
                 <AlertTriangle className="w-3 h-3" />

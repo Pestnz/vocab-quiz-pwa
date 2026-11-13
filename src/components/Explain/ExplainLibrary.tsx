@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Search, Copy, Trash2, FilePlus2, FileUp, CloudOff, CloudUpload, Cloud } from 'lucide-react';
 import type { ExamStatus, LocalExplainDoc } from '../../types/explain';
 import { STATUS_COLOR, STATUS_LABEL, STATUS_ORDER, contentToText } from '../../services/explainMeta';
+import { sectionsToText } from '../../services/explainSections';
 
 interface ExplainLibraryProps {
   docs: LocalExplainDoc[];
@@ -42,7 +43,7 @@ export const ExplainLibrary: React.FC<ExplainLibraryProps> = ({
     () =>
       docs.map((d) => ({
         doc: d,
-        haystack: [d.title, d.eraLabel, String(d.year || ''), d.prefecture, d.examType, contentToText(d.content)]
+        haystack: [d.title, d.eraLabel, String(d.year || ''), d.prefecture, d.examType, contentToText(d.content), sectionsToText(d.sections)]
           .join('\n')
           .toLowerCase(),
       })),

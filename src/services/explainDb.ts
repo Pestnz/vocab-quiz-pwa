@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { DeletedDocRecord, LocalExplainDoc, StoredPdf } from '../types/explain';
 import { isExamStatus } from './explainMeta';
+import { normalizeSections } from './explainSections';
 
 interface ExplainDbSchema extends DBSchema {
   docs: {
@@ -59,7 +60,14 @@ export const SYNCED_KEYS: ReadonlyArray<keyof LocalExplainDoc> = [
   'pdfFileName',
   'pdfFileSize',
   'spreadRatio',
+  'sections',
+  'deletedSectionIds',
 ];
+
+/** SYNCED_KEYS のうち、大問(sections)以外。これを変えたら metaUpdatedAt も更新する */
+export const META_KEYS: ReadonlyArray<keyof LocalExplainDoc> = SYNCED_KEYS.filter(
+  (k) => k !== 'sections' && k !== 'deletedSectionIds'
+);
 
 export function createEmptyDoc(title = '無題の解説'): LocalExplainDoc {
   const now = new Date().toISOString();
@@ -76,6 +84,9 @@ export function createEmptyDoc(title = '無題の解説'): LocalExplainDoc {
     pdfFileName: null,
     pdfFileSize: null,
     spreadRatio: 0.5,
+    sections: [],
+    deletedSectionIds: [],
+    metaUpdatedAt: now,
     pdfPage: 1,
     pdfZoom: 0.8,
     spreadSide: 'off',
@@ -108,9 +119,14 @@ export function normalizeDoc(raw: Partial<LocalExplainDoc> & { id: string }): Lo
     pdfFileName: raw.pdfFileName ?? null,
     pdfFileSize: raw.pdfFileSize ?? null,
     spreadRatio: raw.spreadRatio ?? 0.5,
+    sections: normalizeSections(raw.sections),
+    deletedSectionIds: Array.isArray(raw.deletedSectionIds)
+      ? raw.deletedSectionIds.filter((d): d is string => typeof d === 'string')
+      : [],
     createdAt,
     updatedAt,
     syncUpdatedAt: raw.syncUpdatedAt ?? updatedAt,
+    metaUpdatedAt: raw.metaUpdatedAt ?? raw.syncUpdatedAt ?? updatedAt,
     baseUpdatedAt: raw.baseUpdatedAt ?? null,
     remoteSha: raw.remoteSha ?? null,
     lastSyncedAt: raw.lastSyncedAt ?? null,

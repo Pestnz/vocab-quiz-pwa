@@ -19,6 +19,58 @@ export interface PrintLayout {
   showPageNumber: boolean;
 }
 
+// ---------------- 大問・設問(SPEC §5.3 / §5.4) ----------------
+
+export type SectionKind = 'listening' | 'dialogue' | 'composition' | 'reading' | 'other';
+
+export type QuestionType =
+  | 'choice' // 選択(ア〜エ / A〜D)
+  | 'reorder' // 語順整序
+  | 'inflection' // 語形変化(1語)
+  | 'fillBlank' // 空所に1語/語句を記述
+  | 'composition' // 英作文(語数制限つき)
+  | 'slideOrder' // 図・スライドの並べ替え
+  | 'free'; // その他
+
+/** 選択肢ごとの○×と理由。id は、別の端末の編集と食い違わないための識別子 */
+export interface ChoiceExplanation {
+  id: string;
+  label: string; // 'ア' 'イ' 'A' など
+  isCorrect: boolean;
+  reason: JSONContent | null; // 正解の根拠 / 誤りの理由(選択問題では必須入力)
+}
+
+export interface Question {
+  id: string;
+  order: number; // 大問内の並び順(小さい順)
+  label: string; // '(1)' '② ' 'No.1' など
+  type: QuestionType;
+  prompt?: string; // 設問の要点(任意。著作物の転載は最小限に)
+  correctAnswer: string; // 正解(例: 'ウ' / 'ア→エ→イ→ウ→オ')
+  points?: number; // 配点
+  explanation: JSONContent | null; // 解説本文
+  choices?: ChoiceExplanation[]; // choice のとき
+  modelAnswers?: string[]; // 英作文などの模範解答
+  scoringNotes?: string; // 採点基準・部分点の考え方
+  wordLimit?: { min?: number; max?: number }; // 英作文の語数制限
+  commonErrors?: string; // よくある誤答(講師用。生徒用には印刷しない)
+  teacherNote?: string; // 講師メモ(生徒用には印刷しない)
+  updatedAt: string;
+}
+
+export interface ExamSection {
+  id: string;
+  order: number; // 大問の並び順(小さい順)
+  number: string; // '1', '7' など。表示用の文字列
+  title?: string; // 例: '長文(スピーチ)'
+  kind: SectionKind;
+  updatedAt: string;
+  deletedItemIds: string[]; // 削除した設問のID(マージ時の復活防止)
+  passages: unknown[]; // 長文・資料(Phase 5 で使う。今は空)
+  questions: Question[];
+  note?: string; // 大問全体の講師メモ(印刷に出さない)
+}
+
 /**
  * 端末内(IndexedDB)の解説ドキュメント。
  * 「同期する項目」(タイトル・メタ情報・本文・印刷設定・PDFの照合情報)と、
@@ -40,12 +92,16 @@ export interface LocalExplainDoc {
   pdfFileName: string | null;
   pdfFileSize: number | null;
   spreadRatio: number; // 見開きの分割位置(PDFの性質なので同期する)
+  sections: ExamSection[]; // 大問(設問)。設問単位でマージする
+  deletedSectionIds: string[]; // 削除した大問のID(マージ時の復活防止)
+  metaUpdatedAt: string; // sections 以外の「同期する項目」を最後に変えた日時
 
   // --- 端末ごとの表示状態(同期しない) ---
   pdfPage: number;
   pdfZoom: number;
   spreadSide: SpreadSide;
   splitRatio: number; // 画面左(PDF)の幅の割合 (0.25〜0.75)
+  editorMode?: 'free' | 'sections'; // 右側の表示(自由記述 / 大問)。省略時は自由記述
 
   // --- 日時・同期の記録 ---
   createdAt: string;
@@ -98,10 +154,11 @@ export interface ExplainFile {
   pdfRefs: PdfRef[];
   content: JSONContent | null;
   layout?: PrintLayout;
-  sections: unknown[];
+  sections: ExamSection[];
   deletedSectionIds: string[];
   createdAt: string;
-  updatedAt: string;
+  updatedAt: string; // 同期する項目全体の最終更新(= syncUpdatedAt)
+  metaUpdatedAt?: string; // sections 以外の最終更新。Phase 3 までのファイルには無い
 }
 
 export interface ExplainIndexItem {
