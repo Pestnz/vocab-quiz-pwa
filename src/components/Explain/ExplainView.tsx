@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { JSONContent } from '@tiptap/react';
-import { FilePlus2, FileUp, Trash2, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
-import type { LocalExplainDoc, SpreadSide } from '../../types/explain';
+import { FilePlus2, FileUp, Trash2, CheckCircle2, Loader2, AlertTriangle, Printer } from 'lucide-react';
+import type { LocalExplainDoc, PrintLayout, SpreadSide } from '../../types/explain';
+import { normalizeLayout } from '../../services/explainLayout';
 import {
   createEmptyDoc,
   deleteDocAndOrphanPdf,
@@ -12,6 +13,7 @@ import {
 } from '../../services/explainDb';
 import { PdfViewer } from './PdfViewer';
 import { DocEditor } from './DocEditor';
+import { PrintPreview } from './PrintPreview';
 
 type SaveState = 'saved' | 'unsaved' | 'saving' | 'error';
 
@@ -28,6 +30,8 @@ export const ExplainView: React.FC = () => {
   const [ratio, setRatio] = useState(0.5);
   const [narrow, setNarrow] = useState(false);
   const [tab, setTab] = useState<'pdf' | 'editor'>('editor');
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const closePreview = useCallback(() => setPreviewOpen(false), []);
 
   const docRef = useRef<LocalExplainDoc | null>(null);
   const dirtyRef = useRef(false);
@@ -270,13 +274,24 @@ export const ExplainView: React.FC = () => {
     />
   ) : null;
 
+  const layout = normalizeLayout(current?.layout);
+
   const editorPane = current ? (
-    <DocEditor key={current.id} initialContent={current.content} onChange={handleEditorChange} />
+    <DocEditor key={current.id} initialContent={current.content} layout={layout} onChange={handleEditorChange} />
   ) : null;
 
   return (
     <div className="flex flex-col w-full" style={{ height: 'calc(100dvh - 5.5rem)' }}>
       <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={handleFileChosen} />
+
+      {previewOpen && current && (
+        <PrintPreview
+          doc={current}
+          layout={layout}
+          onLayoutChange={(l: PrintLayout) => patchDoc({ layout: l })}
+          onClose={closePreview}
+        />
+      )}
 
       {/* 上部バー */}
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-800 bg-slate-900">
@@ -317,6 +332,12 @@ export const ExplainView: React.FC = () => {
           <FileUp className="w-3.5 h-3.5" />
           PDFを開く
         </button>
+        {current && (
+          <button className={`${topBtn} !bg-emerald-700 hover:!bg-emerald-600 !border-emerald-600`} onClick={() => setPreviewOpen(true)}>
+            <Printer className="w-3.5 h-3.5" />
+            印刷プレビュー
+          </button>
+        )}
         {current && (
           <button className={`${topBtn} hover:!bg-rose-900/60`} onClick={() => void handleDelete()}>
             <Trash2 className="w-3.5 h-3.5" />

@@ -1,18 +1,21 @@
 import React from 'react';
 import { useEditor, EditorContent, useEditorState } from '@tiptap/react';
 import type { JSONContent } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import { Bold, Italic, Underline, List, ListOrdered, Quote, Heading2, Heading3, Undo2, Redo2, Minus } from 'lucide-react';
+import { Bold, Italic, Underline, List, ListOrdered, Quote, Heading2, Heading3, Undo2, Redo2, Minus, SeparatorHorizontal, StickyNote } from 'lucide-react';
+import type { PrintLayout } from '../../types/explain';
+import { explainExtensions } from '../../services/explainExtensions';
+import { MM_TO_PX } from '../../services/explainLayout';
 import './explain.css';
 
 interface DocEditorProps {
   initialContent: JSONContent | null;
+  layout: PrintLayout;
   onChange: (content: JSONContent) => void;
 }
 
-export const DocEditor: React.FC<DocEditorProps> = ({ initialContent, onChange }) => {
+export const DocEditor: React.FC<DocEditorProps> = ({ initialContent, layout, onChange }) => {
   const editor = useEditor({
-    extensions: [StarterKit],
+    extensions: explainExtensions,
     content: initialContent ?? '',
     onUpdate: ({ editor: ed }) => onChange(ed.getJSON()),
     editorProps: {
@@ -32,6 +35,7 @@ export const DocEditor: React.FC<DocEditorProps> = ({ initialContent, onChange }
       bullet: ed?.isActive('bulletList') ?? false,
       ordered: ed?.isActive('orderedList') ?? false,
       quote: ed?.isActive('blockquote') ?? false,
+      teacherNote: ed?.isActive('teacherNote') ?? false,
       canUndo: ed?.can().undo() ?? false,
       canRedo: ed?.can().redo() ?? false,
     }),
@@ -85,11 +89,37 @@ export const DocEditor: React.FC<DocEditorProps> = ({ initialContent, onChange }
         <button className={tb(false)} title="区切り線" onClick={() => editor.chain().focus().setHorizontalRule().run()}>
           <Minus className="w-4 h-4" />
         </button>
-        <span className="ml-auto text-[10px] text-slate-500">赤線 = A4の1ページの目安</span>
+        <span className="mx-1 h-4 w-px bg-slate-700" />
+        <button
+          className={tb(false)}
+          title="ここで改ページ(印刷時に次のページへ)"
+          onClick={() => editor.chain().focus().insertContent({ type: 'pageBreak' }).run()}
+        >
+          <SeparatorHorizontal className="w-4 h-4" />
+        </button>
+        <button
+          className={tb(active.teacherNote)}
+          title="講師メモ(生徒配布用には印刷されません)"
+          onClick={() =>
+            active.teacherNote
+              ? editor.chain().focus().lift('teacherNote').run()
+              : editor.chain().focus().wrapIn('teacherNote').run()
+          }
+        >
+          <StickyNote className="w-4 h-4" />
+        </button>
+        <span className="ml-auto text-[10px] text-slate-500">赤線 = A4の1ページの目安(正確な改ページは印刷プレビューで確認)</span>
       </div>
 
       <div className="flex-1 min-h-0 overflow-auto p-4 bg-slate-800/60">
-        <div className="explain-paper">
+        <div
+          className="explain-paper"
+          style={{
+            padding: `${layout.marginTop * MM_TO_PX}px ${layout.marginRight * MM_TO_PX}px ${layout.marginBottom * MM_TO_PX}px ${layout.marginLeft * MM_TO_PX}px`,
+            fontSize: `${layout.fontSizePt}pt`,
+            lineHeight: layout.lineHeight,
+          }}
+        >
           <EditorContent editor={editor} />
         </div>
       </div>

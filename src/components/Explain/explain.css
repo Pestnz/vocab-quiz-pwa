@@ -1,16 +1,24 @@
-/* 解説エディターの「用紙」(A4幅 210mm ≒ 794px @96dpi)。画面は白地・黒文字で、印刷の見た目に近づける */
+/*
+ * 解説の見た目。編集用の「用紙」(.explain-paper)と、印刷用のページ本文(.explain-page-body)で
+ * 同じ文字組みを共有し、見たまま印刷されるようにする。
+ */
+.explain-paper,
+.explain-page-body {
+  box-sizing: border-box;
+  background-color: #ffffff;
+  color: #111111;
+  font-family: 'Yu Mincho', 'Hiragino Mincho ProN', 'Noto Serif JP', 'Times New Roman', serif;
+  font-size: 10.5pt;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+/* ---- 編集用の用紙(A4幅 210mm ≒ 794px @96dpi)。余白・文字サイズはインラインで指定 ---- */
 .explain-paper {
   width: 794px;
   max-width: 100%;
   min-height: 1123px;
-  box-sizing: border-box;
   margin: 0 auto;
-  padding: 76px 76px; /* 約20mm */
-  background-color: #ffffff;
-  color: #111111;
-  font-family: 'Yu Mincho', 'Hiragino Mincho ProN', 'Noto Serif JP', 'Times New Roman', serif;
-  font-size: 14px;
-  line-height: 1.8;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
   /* A4 1ページ(1123px)ごとの改ページ目安線 */
   background-image: repeating-linear-gradient(
@@ -31,22 +39,101 @@
   margin-top: 0.6em;
 }
 
-.explain-paper h1 { font-size: 1.6em; font-weight: 700; line-height: 1.4; }
-.explain-paper h2 { font-size: 1.3em; font-weight: 700; line-height: 1.4; border-bottom: 1px solid #999; padding-bottom: 2px; }
-.explain-paper h3 { font-size: 1.1em; font-weight: 700; line-height: 1.4; }
-.explain-paper ul { list-style: disc; padding-left: 1.6em; }
-.explain-paper ol { list-style: decimal; padding-left: 1.6em; }
-.explain-paper blockquote { border: 1px solid #555; padding: 0.4em 0.8em; background: #f5f5f5; }
-.explain-paper hr { border: none; border-top: 1px solid #999; margin: 1em 0; }
-.explain-paper code { background: #eee; padding: 0 3px; border-radius: 3px; font-size: 0.92em; }
-.explain-paper strong { font-weight: 700; }
-.explain-paper em { font-style: italic; }
-.explain-paper u { text-decoration: underline; }
+/* ---- 印刷ページの本文: ブロックの間隔は margin-bottom で統一(測定とレイアウトを一致させる) ---- */
+.explain-page-body > * {
+  margin: 0 0 0.6em;
+}
+.explain-page-body > .ex-li-mid {
+  margin-bottom: 0;
+}
+.explain-page-body p:empty::before {
+  content: '\200b'; /* 空行も1行分の高さを持たせる */
+}
 
-.explain-paper .ProseMirror p.is-editor-empty:first-child::before {
-  content: attr(data-placeholder);
-  color: #aaa;
-  float: left;
+/* ---- 共通の要素スタイル ---- */
+.explain-paper h1, .explain-page-body h1 { font-size: 1.6em; font-weight: 700; line-height: 1.4; }
+.explain-paper h2, .explain-page-body h2 { font-size: 1.3em; font-weight: 700; line-height: 1.4; border-bottom: 1px solid #999; padding-bottom: 2px; }
+.explain-paper h3, .explain-page-body h3 { font-size: 1.1em; font-weight: 700; line-height: 1.4; }
+.explain-paper ul, .explain-page-body ul { list-style: disc; padding-left: 1.6em; }
+.explain-paper ol, .explain-page-body ol { list-style: decimal; padding-left: 1.6em; }
+.explain-paper blockquote, .explain-page-body blockquote { border: 1px solid #555; padding: 0.4em 0.8em; background: #f5f5f5; }
+.explain-paper hr, .explain-page-body hr { border: none; border-top: 1px solid #999; margin: 1em 0; }
+.explain-paper code, .explain-page-body code { background: #eee; padding: 0 3px; border-radius: 3px; font-size: 0.92em; }
+.explain-paper strong, .explain-page-body strong { font-weight: 700; }
+.explain-paper em, .explain-page-body em { font-style: italic; }
+.explain-paper u, .explain-page-body u { text-decoration: underline; }
+.explain-paper li > p, .explain-page-body li > p { margin: 0; }
+
+/* ---- 講師メモ(生徒配布用には印刷されない) ---- */
+.explain-paper [data-teacher-note],
+.explain-page-body [data-teacher-note] {
+  border-left: 4px solid #d97706;
+  background: #fef3c7;
+  padding: 0.3em 0.8em;
+}
+.explain-paper [data-teacher-note]::before {
+  content: '講師メモ(生徒用には印刷されません)';
+  display: block;
+  font-family: sans-serif;
+  font-size: 9px;
+  color: #b45309;
+}
+.explain-page-body [data-teacher-note]::before {
+  content: '講師メモ';
+  display: block;
+  font-family: sans-serif;
+  font-size: 8pt;
+  color: #b45309;
+}
+.explain-paper [data-teacher-note] > * + * { margin-top: 0.4em; }
+
+/* ---- 手動の改ページ(編集画面では破線で表示。印刷ページには出力されない) ---- */
+.explain-paper [data-page-break] {
   height: 0;
-  pointer-events: none;
+  margin: 1.2em 0;
+  border-top: 2px dashed #64748b;
+  position: relative;
+  user-select: none;
+}
+.explain-paper [data-page-break]::after {
+  content: '改ページ';
+  position: absolute;
+  right: 0;
+  top: -9px;
+  padding: 0 6px;
+  background: #fff;
+  color: #64748b;
+  font: 10px sans-serif;
+}
+.explain-paper [data-page-break].ProseMirror-selectednode {
+  border-top-color: #059669;
+}
+
+/* ---- 印刷プレビューのページ ---- */
+.explain-print-sheet {
+  position: relative;
+  width: 210mm;
+  height: 297mm;
+  margin: 0 auto 16px;
+  overflow: hidden;
+  background: #fff;
+  color: #111;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  break-after: page;
+  page-break-after: always;
+}
+.explain-print-sheet:last-child {
+  break-after: auto;
+  page-break-after: auto;
+}
+.explain-print-sheet .ex-header,
+.explain-print-sheet .ex-footer {
+  position: absolute;
+  font-family: 'Yu Gothic', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  font-size: 8.5pt;
+  color: #555;
+}
+.explain-print-sheet .explain-page-body {
+  position: absolute;
+  overflow: hidden;
 }
