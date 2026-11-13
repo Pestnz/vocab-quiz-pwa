@@ -8,6 +8,7 @@ import { buildPrintHtml } from '../../services/explainPrintHtml';
 import type { PrintScope } from '../../services/explainPrintHtml';
 import { countMissingReasons } from '../../services/explainSections';
 import { countUnreviewed } from '../../services/explainPassages';
+import { countStructureUnreviewed } from '../../services/explainStructure';
 import { DEFAULT_PRINT_LAYOUT, normalizeLayout } from '../../services/explainLayout';
 import './explain.css';
 
@@ -38,6 +39,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
   const [mode, setMode] = useState<PrintMode>('teacher');
   // 自由記述だけの解説は「自由記述のみ」、大問があれば「すべて」から始める
   const [scope, setScope] = useState<PrintScope>('all');
+  const [withStructure, setWithStructure] = useState(false); // 本文に、品詞分解も印刷する
   const [zoom, setZoom] = useState<number>(0.85);
   const [showSettings, setShowSettings] = useState(false);
   const [result, setResult] = useState<PaginateResult | null>(null);
@@ -67,7 +69,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
-        const r = await paginate(buildPrintHtml({ ...doc, content: doc.content, sections: doc.sections }, scope), layout, mode);
+        const r = await paginate(buildPrintHtml({ ...doc, content: doc.content, sections: doc.sections }, scope, { structure: withStructure }), layout, mode);
         if (!cancelled) setResult(r);
       } catch (e) {
         console.error('Failed to paginate', e);
@@ -79,11 +81,13 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
     };
     // doc 全体ではなく、印刷に関わる項目だけを監視する(ページ位置の変更などで再計算しない)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc.content, doc.sections, layout, mode, scope]);
+  }, [doc.content, doc.sections, layout, mode, scope, withStructure]);
 
   const missingReasons = scope === 'free' || scope === 'passages' ? 0 : countMissingReasons(doc.sections);
   // AIの下書き・読み取りのまま(未確認)の文。印刷の前に気づけるように警告する
   const unreviewed = scope === 'free' || scope === 'answers' ? 0 : doc.sections.reduce((n, s) => n + countUnreviewed(s.passages), 0);
+  const structUnreviewed =
+    withStructure && (scope === 'all' || scope === 'passages') ? doc.sections.reduce((n, s) => n + countStructureUnreviewed(s.passages), 0) : 0;
 
   const headerText = layout.headerText.trim() || doc.title;
   const pageCount = result?.pages.length ?? 0;
@@ -141,6 +145,13 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
               <option value="answers">解答解説(設問)のみ</option>
               <option value="free">自由記述のみ</option>
             </select>
+
+            {(scope === 'all' || scope === 'passages') && (
+              <label className="flex items-center gap-1 text-xs text-slate-300" title="本文の各文に、語ごとの品詞・役割・かっこを付けて印刷します">
+                <input type="checkbox" checked={withStructure} onChange={(e) => setWithStructure(e.target.checked)} />
+                品詞分解も印刷する
+              </label>
+            )}
 
             <select
               value={zoom}
@@ -214,6 +225,12 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
               <span className="ml-2 inline-flex items-center gap-1 text-amber-400">
                 <AlertTriangle className="w-3 h-3" />
                 本文に、確認していない文(AIの下書きなど)が {unreviewed} 文あります。印刷の前に確認してください。
+              </span>
+            )}
+            {structUnreviewed > 0 && (
+              <span className="ml-2 inline-flex items-center gap-1 text-amber-400">
+                <AlertTriangle className="w-3 h-3" />
+                品詞分解に、確認していない文が {structUnreviewed} 文あります(AIの下書きは誤りを含むことがあります)。
               </span>
             )}
             {missingReasons > 0 && (

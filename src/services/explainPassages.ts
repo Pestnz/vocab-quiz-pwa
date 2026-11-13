@@ -1,4 +1,5 @@
 import type { GlossaryItem, Passage, PassageSentence, SentenceStructure } from '../types/explain';
+import { sanitizeTokens } from './explainStructure';
 
 /**
  * 本文(長文)と文の、作成・整え・分割・結合。
@@ -34,8 +35,9 @@ const str = (v: unknown, fb = ''): string => (typeof v === 'string' ? v : fb);
 function normalizeStructure(raw: unknown): SentenceStructure | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const s = raw as Partial<SentenceStructure>;
-  if (!Array.isArray(s.tokens)) return undefined;
-  return s as SentenceStructure; // 品詞分解の中身は Phase 5b で扱う。ここでは壊さずに保つ
+  const tokens = sanitizeTokens(s.tokens);
+  if (tokens.length === 0) return undefined;
+  return { tokens, note: typeof s.note === 'string' && s.note.trim() ? s.note : undefined };
 }
 
 export function normalizePassages(raw: unknown): Passage[] {
@@ -54,6 +56,7 @@ export function normalizePassages(raw: unknown): Passage[] {
         ja: str(x.ja),
         speaker: typeof x.speaker === 'string' && x.speaker !== '' ? x.speaker : undefined,
         structure: normalizeStructure(x.structure),
+        structureReviewed: x.structureReviewed ? true : undefined,
         ocrConfidence: x.ocrConfidence === 'low' || x.ocrConfidence === 'high' ? x.ocrConfidence : undefined,
         reviewed: Boolean(x.reviewed),
         paraStart: x.paraStart ? true : undefined,

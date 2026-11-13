@@ -83,8 +83,9 @@ export interface PassageSentence {
   ja: string; // 全訳
   speaker?: string; // 対話文の話者
   structure?: SentenceStructure; // 品詞分解・文構造(任意。Phase 5b)
+  structureReviewed?: boolean; // 品詞分解を、人が確認済みか(英文・全訳の reviewed とは別。AIの下書きは false)
   ocrConfidence?: 'high' | 'low'; // 読み取りの自信。低いものは確認を促す
-  reviewed: boolean; // 人が確認済みか(AIの下書き・読み取りのままなら false)
+  reviewed: boolean; // 英文・全訳を、人が確認済みか(AIの下書き・読み取りのままなら false)
   paraStart?: boolean; // この文から新しい段落が始まる(SPEC の paragraphBreaks の代わりに、文ごとに持つ)
   updatedAt: string;
 }

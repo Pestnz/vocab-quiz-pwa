@@ -1,6 +1,7 @@
-import type { ExamSection, LocalExplainDoc, Passage, Question } from '../types/explain';
+import type { ExamSection, LocalExplainDoc, Passage, PassageSentence, Question } from '../types/explain';
 import { bySectionOrder, fullLabel, isRichEmpty, orderedWithDepth } from './explainSections';
 import { toParagraphs } from './explainPassages';
+import { bracketsOf, groupMarks, posShort } from './explainStructure';
 import { docToHtml } from './explainPaginate';
 
 /** all = 自由記述+本文解説+解答解説 / passages = 本文解説のみ / answers = 解答解説のみ / free = 自由記述のみ */
@@ -61,10 +62,59 @@ function questionHtml(q: Question, label: string, depth: 0 | 1): string {
 const CIRCLED = (n: number): string => (n >= 1 && n <= 20 ? String.fromCharCode(0x2460 + n - 1) : `(${n})`);
 const SENTENCES_PER_TABLE = 8; // 1つの表(途中で切れないブロック)に入れる文の数。段落が長くても、ページに収まるように分ける
 
-/** 本文(英文と全訳)の印刷用HTML。段落ごとに、文番号・英文・全訳を並べた表にする */
-function passageHtml(p: Passage): string {
+export interface PrintOptions {
+  structure: boolean; // 品詞分解(語ごとの品詞・役割・かっこ)も印刷する
+}
+
+/** 1文の品詞分解の印刷用HTML: 語ごとに、英語の下に品詞、その下に役割。かっこ付けは語の前後に付ける */
+function structuredSentenceHtml(s: PassageSentence, no: number): string {
+  const speaker = s.speaker?.trim() ? `<b class="ex-speaker">${esc(s.speaker)}:</b> ` : '';
+  const head = `<span class="ex-sno">${CIRCLED(no)}</span>`;
+  let body: string;
+  const tokens = s.structure?.tokens ?? [];
+  if (tokens.length > 0) {
+    const marks = groupMarks(tokens);
+    body =
+      `<div class="ex-toks">${speaker ? `<span class="ex-tok ex-tok-sp">${speaker}</span>` : ''}` +
+      tokens
+        .map((t, i) => {
+          const open = marks.open[i].map((g) => `<span class="gb">${esc(bracketsOf(g)[0])}</span>`).join('');
+          const close = marks.close[i]
+            .slice()
+            .reverse()
+            .map((g) => `<span class="gb">${esc(bracketsOf(g)[1])}</span>`)
+            .join('');
+          return (
+            `<span class="ex-tok"><span class="ex-tw">${open}${esc(t.text)}${close}</span>` +
+            `<span class="ex-tp">${esc(posShort(t.pos))}</span>` +
+            `<span class="ex-tr">${t.role && t.role !== 'other' ? esc(t.role) : ''}</span></span>`
+          );
+        })
+        .join('') +
+      `</div>`;
+  } else {
+    body = `<div class="ex-toks ex-plain">${speaker}${esc(s.en)}</div>`; // 品詞分解がない文は、英文だけ
+  }
+  const ja = s.ja.trim() ? `<div class="ex-sent-ja">${esc(s.ja)}</div>` : '';
+  const note = s.structure?.note?.trim() ? `<div class="ex-sent-note">▶ ${esc(s.structure.note)}</div>` : '';
+  return `<div class="ex-sent${s.paraStart ? ' ex-para' : ''}">${head}${body}${ja}${note}</div>`;
+}
+
+/** 本文(英文と全訳)の印刷用HTML。品詞分解なしは、段落ごとに、文番号・英文・全訳を並べた表にする */
+function passageHtml(p: Passage, opts: PrintOptions): string {
   const out: string[] = [];
   if (p.title?.trim()) out.push(`<h3>${esc(p.title)}</h3>`);
+  if (opts.structure) {
+    // 品詞分解つき: 1文を1つのブロックにする(文の途中でページを切らない)
+    [...p.sentences]
+      .sort((a, b) => a.order - b.order)
+      .forEach((s, i) => out.push(structuredSentenceHtml(s, i + 1)));
+    const gl2 = (p.glossary ?? []).filter((g) => g.term.trim() !== '');
+    if (gl2.length > 0) {
+      out.push(`<p class="ex-glossary"><b>(注)</b> ${gl2.map((g) => `${esc(g.term)} ${esc(g.meaning)}`).join('　')}</p>`);
+    }
+    return out.join('');
+  }
   let no = 0;
   for (const para of toParagraphs(p.sentences)) {
     for (let i = 0; i < para.length; i += SENTENCES_PER_TABLE) {
@@ -92,11 +142,11 @@ interface Include {
   questions: boolean;
 }
 
-function sectionHtml(s: ExamSection, inc: Include): string {
+function sectionHtml(s: ExamSection, inc: Include, opts: PrintOptions): string {
   const title = `大問${s.number || ''}${s.title ? ` ${s.title}` : ''}`;
   const out: string[] = [`<h2>${esc(title)}</h2>`];
   if (s.note?.trim()) out.push(`<div data-teacher-note="true"><p>${plain(s.note)}</p></div>`);
-  if (inc.passages) for (const p of [...s.passages]) out.push(passageHtml(p));
+  if (inc.passages) for (const p of [...s.passages]) out.push(passageHtml(p, opts));
   if (inc.questions) {
     for (const { q, depth } of orderedWithDepth(s.questions)) out.push(questionHtml(q, fullLabel(q, s.questions), depth));
   }
@@ -104,7 +154,11 @@ function sectionHtml(s: ExamSection, inc: Include): string {
 }
 
 /** 大問(本文解説・解答解説)の印刷用HTML。設問や表は1つのブロックで、ページの途中で切れない */
-export function sectionsToHtml(sections: ExamSection[], inc: Include = { passages: true, questions: true }): string {
+export function sectionsToHtml(
+  sections: ExamSection[],
+  inc: Include = { passages: true, questions: true },
+  opts: PrintOptions = { structure: false }
+): string {
   return [...sections]
     .sort(bySectionOrder)
     .filter(
@@ -113,16 +167,16 @@ export function sectionsToHtml(sections: ExamSection[], inc: Include = { passage
         (inc.passages && s.passages.some((p) => p.sentences.length > 0)) ||
         (s.note ?? '').trim() !== ''
     )
-    .map((s) => sectionHtml(s, inc))
+    .map((s) => sectionHtml(s, inc, opts))
     .join('');
 }
 
 /** 印刷する範囲に応じて、自由記述・本文解説・解答解説を組み合わせた、印刷用のHTMLを作る */
-export function buildPrintHtml(doc: LocalExplainDoc, scope: PrintScope): string {
+export function buildPrintHtml(doc: LocalExplainDoc, scope: PrintScope, opts: PrintOptions = { structure: false }): string {
   const free = scope === 'all' || scope === 'free' ? docToHtml(doc.content) : '';
   const sections =
     scope === 'free'
       ? ''
-      : sectionsToHtml(doc.sections, { passages: scope !== 'answers', questions: scope !== 'passages' });
+      : sectionsToHtml(doc.sections, { passages: scope !== 'answers', questions: scope !== 'passages' }, opts);
   return `${free}${sections}`;
 }

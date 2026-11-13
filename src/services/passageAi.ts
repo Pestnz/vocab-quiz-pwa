@@ -1,6 +1,7 @@
 import { AiError, callGeminiJson } from './aiRouter';
 import type { AiPart } from './aiRouter';
-import type { GlossaryItem } from '../types/explain';
+import type { GlossaryItem, SentenceStructure } from '../types/explain';
+import { fitStructureToSentence, sanitizeTokens } from './explainStructure';
 import { DEFAULT_LINES_PER_STRIP, planStrips } from './ocrStrips';
 import type { Strip } from './ocrStrips';
 
@@ -220,5 +221,106 @@ export async function translateSentences(
     onProgress?.(c + 1, chunks.length);
   }
   result.missing = targets.map((t) => t.no).filter((no) => !result.translations.has(no));
+  return result;
+}
+
+// ---------------- 品詞分解の下書き ----------------
+
+const STRUCTURE_SYSTEM = `You are an English teacher analysing sentence structure (品詞分解・文型) for Japanese high-school entrance-exam commentary handouts.
+For each numbered sentence, split it into tokens IN ORDER so that joining all token texts (with spaces) reproduces the sentence exactly. Keep punctuation and quotation marks attached to the neighbouring word; never make punctuation a separate token. Keep blanks like ( A ) as a single token.
+For each token give:
+- "pos": the part of speech in Japanese, one of: 名詞, 代名詞, 動詞, 助動詞, 形容詞, 副詞, 前置詞, 接続詞, 冠詞, 関係代名詞, to不定詞, 動名詞, 分詞, 疑問詞, 間投詞, その他.
+- "role": the sentence element of the clause it belongs to: "S" (subject), "V" (verb), "O" (object), "C" (complement), "M" (modifier: adverbs, prepositional phrases, etc.) or "other" (conjunctions, articles and other function words that belong to a larger element). Every main clause needs S and V. Label all tokens of a phrase with that phrase's role (e.g. all words of a noun-phrase object are "O").
+- "group" (optional, use only for clear subordinate units): {"type": "noun"|"clause"|"adv"|"adj"|"to-inf"|"ing", "id": a short id such as "g1"} shared by all tokens of the same unit. Use noun/clause for noun clauses, adj for relative clauses and adjective phrases, adv for adverbial phrases/clauses, to-inf for to-infinitive phrases, ing for gerund/participle phrases. Do not nest groups.
+And for each sentence give "note": ONE short Japanese grammar point (about 40 characters or fewer), never empty.
+Return only JSON.`;
+
+const STRUCTURE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    sentences: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          no: { type: 'NUMBER' },
+          tokens: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                text: { type: 'STRING' },
+                pos: { type: 'STRING' },
+                role: { type: 'STRING', enum: ['S', 'V', 'O', 'C', 'M', 'other'] },
+                group: {
+                  type: 'OBJECT',
+                  nullable: true,
+                  properties: { type: { type: 'STRING', enum: ['noun', 'clause', 'adv', 'adj', 'to-inf', 'ing'] }, id: { type: 'STRING' } },
+                },
+              },
+              required: ['text', 'pos', 'role'],
+            },
+          },
+          note: { type: 'STRING' },
+        },
+        required: ['no', 'tokens', 'note'],
+      },
+    },
+  },
+  required: ['sentences'],
+};
+
+/** 1回の呼び出しで分解する文の最大数(出力が長すぎて、途中で切れないようにする) */
+export const STRUCTURE_CHUNK = 15;
+
+export const estimateStructureCalls = (sentenceCount: number): number => Math.max(1, Math.ceil(sentenceCount / STRUCTURE_CHUNK));
+
+export interface StructureResult {
+  structures: Map<number, SentenceStructure>;
+  repaired: number[]; // 語の分け方を、英文に合わせて補正した文番号
+  missing: number[]; // 使える結果が返らなかった文番号
+  calls: number;
+  models: string[];
+}
+
+/** 全文(文脈)を渡して、targets の文を品詞分解する。文が多いときは、自動で分けて呼ぶ */
+export async function structureSentences(
+  allSentences: TranslateTarget[],
+  targets: TranslateTarget[],
+  apiKey?: string,
+  onProgress?: (done: number, total: number) => void
+): Promise<StructureResult> {
+  const context = allSentences.map((s) => `${s.no}. ${s.en}`).join('\n');
+  const result: StructureResult = { structures: new Map(), repaired: [], missing: [], calls: 0, models: [] };
+  const chunks: TranslateTarget[][] = [];
+  for (let i = 0; i < targets.length; i += STRUCTURE_CHUNK) chunks.push(targets.slice(i, i + STRUCTURE_CHUNK));
+
+  for (let c = 0; c < chunks.length; c++) {
+    const chunk = chunks[c];
+    const prompt = `Full passage (for context):\n"""\n${context}\n"""\n\nAnalyse ONLY these sentences:\n${chunk.map((s) => `${s.no}. ${s.en}`).join('\n')}`;
+    const { data, model } = await callGeminiJson<{ sentences?: Array<{ no?: unknown; tokens?: unknown; note?: unknown }> }>({
+      purpose: 'translate',
+      parts: [{ text: prompt }],
+      system: STRUCTURE_SYSTEM,
+      schema: STRUCTURE_SCHEMA,
+      temperature: 0.1,
+      maxOutputTokens: 16000,
+      apiKey,
+    });
+    result.calls++;
+    if (!result.models.includes(model)) result.models.push(model);
+    const byNo = new Map(chunk.map((s) => [s.no, s]));
+    for (const r of Array.isArray(data.sentences) ? data.sentences : []) {
+      const target = byNo.get(Number(r.no));
+      if (!target) continue;
+      // 語をつなげた結果が英文と合っているかを確かめ、合わなければ補正(できなければ捨てる)
+      const fitted = fitStructureToSentence(target.en, sanitizeTokens(r.tokens));
+      if (!fitted) continue;
+      if (fitted.repaired) result.repaired.push(target.no);
+      result.structures.set(target.no, { tokens: fitted.tokens, note: typeof r.note === 'string' && r.note.trim() ? r.note.trim() : undefined });
+    }
+    onProgress?.(c + 1, chunks.length);
+  }
+  result.missing = targets.map((t) => t.no).filter((no) => !result.structures.has(no));
   return result;
 }

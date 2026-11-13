@@ -4,6 +4,7 @@ import {
   ArrowDownToLine,
   CheckCheck,
   ClipboardPaste,
+  Layers,
   Languages,
   Loader2,
   Plus,
@@ -24,7 +25,9 @@ import {
   sentencesFromText,
   splitSentenceAt,
 } from '../../services/explainPassages';
-import { estimateTranslateCalls, readPassageLines, translateSentences } from '../../services/passageAi';
+import { estimateStructureCalls, estimateTranslateCalls, readPassageLines, structureSentences, translateSentences } from '../../services/passageAi';
+import { hasStructure } from '../../services/explainStructure';
+import { StructureEditor } from './StructureEditor';
 import { planStrips } from '../../services/ocrStrips';
 import { AiError, planFor } from '../../services/aiRouter';
 import { useCrop } from '../../services/cropStore';
@@ -85,7 +88,8 @@ const PassageCard: React.FC<PassageCardProps> = ({ passage, onChange, onDelete }
   const sentences = [...passage.sentences].sort(bySentenceOrder);
   const crop = useCrop();
   const areaRefs = useRef(new Map<string, HTMLTextAreaElement>());
-  const [panel, setPanel] = useState<null | 'paste' | 'ocr' | 'translate' | 'glossary'>(null);
+  const [panel, setPanel] = useState<null | 'paste' | 'ocr' | 'translate' | 'structure' | 'glossary'>(null);
+  const [openStruct, setOpenStruct] = useState<Record<string, boolean>>({}); // 品詞分解の編集欄を開いている文
   const [pasteText, setPasteText] = useState('');
   const [replaceMode, setReplaceMode] = useState(false);
   const [redo, setRedo] = useState(false);
@@ -152,9 +156,15 @@ const PassageCard: React.FC<PassageCardProps> = ({ passage, onChange, onDelete }
 
   const togglePara = (s: PassageSentence) => updateSentence(s.id, { paraStart: s.paraStart ? undefined : true });
 
+  // 英文・全訳の確認済みと、(あれば)品詞分解の確認済みを、まとめて付ける
   const markAllReviewed = () => {
     const stamp = nowIso();
-    commit(passage.sentences.map((s) => (s.reviewed ? s : { ...s, reviewed: true, updatedAt: stamp })));
+    commit(
+      passage.sentences.map((s) => {
+        const needStruct = hasStructure(s) && !s.structureReviewed;
+        return s.reviewed && !needStruct ? s : { ...s, reviewed: true, structureReviewed: hasStructure(s) ? true : s.structureReviewed, updatedAt: stamp };
+      })
+    );
   };
 
   // ---- 貼り付け ----
@@ -237,6 +247,43 @@ const PassageCard: React.FC<PassageCardProps> = ({ passage, onChange, onDelete }
     }
   };
 
+  // ---- 品詞分解の下書き(AI) ----
+  const stTargets = sentences
+    .map((s, i) => ({ s, no: i + 1 }))
+    .filter(({ s }) => s.en.trim() !== '' && (redo || !hasStructure(s)));
+  const stCalls = estimateStructureCalls(stTargets.length);
+  const runStructure = async () => {
+    if (stTargets.length === 0) return;
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const all = sentences.map((s, i) => ({ no: i + 1, en: s.en }));
+      const res = await structureSentences(all, stTargets.map(({ s, no }) => ({ no, en: s.en })), undefined, (d, t) => setProgress(`${d}/${t}`));
+      const stamp = nowIso();
+      const byId = new Map(stTargets.map(({ s, no }) => [s.id, res.structures.get(no)]));
+      commit(
+        passage.sentences.map((s) => {
+          const st = byId.get(s.id);
+          return st ? { ...s, structure: st, structureReviewed: false, updatedAt: stamp } : s;
+        })
+      );
+      setMessage(
+        `${res.structures.size}文の品詞分解を作りました(${res.models.join(', ')}・${res.calls}回消費)。下書きです。品詞・役割は誤りやすいので、確認して直してください。` +
+          (res.repaired.length > 0 ? ` 語の分け方を英文に合わせて補正した文: ${res.repaired.join(', ')}。` : '') +
+          (res.missing.length > 0 ? ` 使える結果が返らなかった文: ${res.missing.join(', ')}(もう一度実行できます)。` : '')
+      );
+      setPanel(null);
+    } catch (e) {
+      setError(e as Error);
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  };
+  const stPlan = planFor('translate');
+  const structUnreviewed = sentences.filter((s) => hasStructure(s) && !s.structureReviewed).length;
+
   const updateGlossary = (next: GlossaryItem[]) => commit(passage.sentences, { glossary: next.length > 0 ? next : undefined });
 
   const hasSpeaker = sentences.some((s) => s.speaker !== undefined);
@@ -258,6 +305,7 @@ const PassageCard: React.FC<PassageCardProps> = ({ passage, onChange, onDelete }
           ) : sentences.length > 0 ? (
             <span className="text-emerald-400"> ・ すべて確認済み</span>
           ) : null}
+          {structUnreviewed > 0 && <span className="text-amber-400"> ・ 品詞分解 未確認 {structUnreviewed}</span>}
         </span>
         <button className={btn} onClick={() => setPanel(panel === 'paste' ? null : 'paste')} title="英文を貼り付けて、文に分ける(AIなし)">
           <ClipboardPaste className="w-3.5 h-3.5" />
@@ -271,7 +319,11 @@ const PassageCard: React.FC<PassageCardProps> = ({ passage, onChange, onDelete }
           <Languages className="w-3.5 h-3.5" />
           全訳を作る(AI)
         </button>
-        <button className={btn} onClick={markAllReviewed} disabled={unreviewed === 0} title="すべての文を確認済みにする">
+        <button className={btn} onClick={() => setPanel(panel === 'structure' ? null : 'structure')} disabled={sentences.length === 0} title="AIで品詞分解(語ごとの品詞・文型の役割・かっこ)の下書きを作る">
+          <Layers className="w-3.5 h-3.5" />
+          品詞分解を作る(AI)
+        </button>
+        <button className={btn} onClick={markAllReviewed} disabled={unreviewed === 0 && structUnreviewed === 0} title="すべての文(品詞分解を含む)を確認済みにする">
           <CheckCheck className="w-3.5 h-3.5" />
           すべて確認済み
         </button>
@@ -370,6 +422,34 @@ const PassageCard: React.FC<PassageCardProps> = ({ passage, onChange, onDelete }
         </div>
       )}
 
+      {panel === 'structure' && (
+        <div className="px-3 py-2 space-y-2 border-b border-slate-800 bg-slate-950/50 text-xs text-slate-300">
+          <p>
+            品詞分解がない文を、AIで分解します(対象 <strong className="text-slate-100">{stTargets.length}</strong> 文)。
+            <strong className="text-slate-100"> この操作は{stCalls}回消費します。</strong>
+            <span className="text-slate-400"> (1回で最大15文。出力が長いので、1回あたり十数秒〜1分かかります。)</span>
+            {stPlan.next ? (
+              <>
+                {' '}使うモデル: <span className="font-mono">{stPlan.next}</span>(今日の残り{' '}
+                <strong className="text-emerald-400">{stPlan.models.find((m) => m.model === stPlan.next)?.remaining}</strong>回)
+              </>
+            ) : (
+              <span className="text-rose-400"> 今日使えるモデルの枠がありません。各文の「品詞分解」から、手で入力できます。</span>
+            )}
+          </p>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1">
+              <input type="checkbox" checked={redo} onChange={(e) => setRedo(e.target.checked)} />
+              品詞分解がある文も、作り直す
+            </label>
+            <button className={`${btn} !bg-emerald-600 !border-emerald-500 !text-white`} onClick={() => void runStructure()} disabled={busy || stTargets.length === 0 || !stPlan.canRun}>
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Layers className="w-3.5 h-3.5" />}
+              {busy ? `作成中…${progress ? `(${progress})` : ''}` : `品詞分解を作る(${stCalls}回消費)`}
+            </button>
+          </div>
+        </div>
+      )}
+
       {(message || error) && (
         <div className={`px-3 py-1.5 text-[11px] border-b border-slate-800 ${error ? 'text-rose-200 bg-rose-950/30' : 'text-emerald-200 bg-emerald-950/20'}`}>
           <div className="flex items-start gap-1">
@@ -443,6 +523,14 @@ const PassageCard: React.FC<PassageCardProps> = ({ passage, onChange, onDelete }
                         <button className="p-0.5 text-slate-400 hover:text-white cursor-pointer" title="英文のカーソル位置で、この文を2つに分ける" onClick={() => doSplit(s.id)}>
                           <Scissors className="w-3 h-3" />
                         </button>
+                        <button
+                          className={`p-0.5 cursor-pointer ${hasStructure(s) ? (s.structureReviewed ? 'text-emerald-400' : 'text-amber-400') : 'text-slate-400 hover:text-white'}`}
+                          title={`品詞分解を${openStruct[s.id] ? '閉じる' : '開く'}${hasStructure(s) ? (s.structureReviewed ? '(確認済み)' : '(未確認)') : '(まだありません)'}`}
+                          onClick={() => setOpenStruct((o) => ({ ...o, [s.id]: !o[s.id] }))}
+                          aria-label={`文${i + 1}の品詞分解`}
+                        >
+                          <Layers className="w-3 h-3" />
+                        </button>
                         <button className="p-0.5 text-slate-400 hover:text-white cursor-pointer disabled:opacity-30" disabled={i === 0} title="前の文と結合する" onClick={() => doMerge(s.id)}>
                           <Merge className="w-3 h-3" />
                         </button>
@@ -458,6 +546,11 @@ const PassageCard: React.FC<PassageCardProps> = ({ passage, onChange, onDelete }
                       </div>
                     </div>
                   </div>
+                  {openStruct[s.id] && (
+                    <div className="ml-8">
+                      <StructureEditor sentence={s} onChange={(patch) => updateSentence(s.id, patch)} />
+                    </div>
+                  )}
                 </React.Fragment>
               );
             })}
