@@ -35,6 +35,7 @@ const MiniEditor: React.FC<{
       bullet: ed?.isActive('bulletList') ?? false,
       ordered: ed?.isActive('orderedList') ?? false,
       imagePct: ed?.isActive('explainImage') ? Number(ed.getAttributes('explainImage').widthPct) || 100 : null,
+      imageAlign: (ed?.isActive('explainImage') ? ed.getAttributes('explainImage').align : 'block') as 'block' | 'left' | 'right',
     }),
   });
   if (!editor || !active) return null;
@@ -83,7 +84,9 @@ const MiniEditor: React.FC<{
         <ImageSizeButtons
           keepFocus
           current={active.imagePct}
+          align={active.imageAlign}
           onChange={(pct) => editor.chain().focus().updateAttributes('explainImage', { widthPct: pct }).run()}
+          onAlignChange={(align) => editor.chain().focus().updateAttributes('explainImage', { align }).run()}
         />
         <span className="ml-auto text-[10px] text-slate-400 pr-1">枠の外をクリックで確定</span>
       </div>

@@ -38,6 +38,7 @@ export const DocEditor: React.FC<DocEditorProps> = ({ initialContent, layout, on
       quote: ed?.isActive('blockquote') ?? false,
       teacherNote: ed?.isActive('teacherNote') ?? false,
       imagePct: ed?.isActive('explainImage') ? Number(ed.getAttributes('explainImage').widthPct) || 100 : null,
+      imageAlign: (ed?.isActive('explainImage') ? ed.getAttributes('explainImage').align : 'block') as 'block' | 'left' | 'right',
       canUndo: ed?.can().undo() ?? false,
       canRedo: ed?.can().redo() ?? false,
     }),
@@ -120,7 +121,12 @@ export const DocEditor: React.FC<DocEditorProps> = ({ initialContent, layout, on
               .run()
           }
         />
-        <ImageSizeButtons current={active.imagePct} onChange={(pct) => editor.chain().focus().updateAttributes('explainImage', { widthPct: pct }).run()} />
+        <ImageSizeButtons
+          current={active.imagePct}
+          align={active.imageAlign}
+          onChange={(pct) => editor.chain().focus().updateAttributes('explainImage', { widthPct: pct }).run()}
+          onAlignChange={(align) => editor.chain().focus().updateAttributes('explainImage', { align }).run()}
+        />
         <span className="ml-auto text-[10px] text-slate-500">赤線 = A4の1ページの目安(正確な改ページは印刷プレビューで確認)</span>
       </div>
 

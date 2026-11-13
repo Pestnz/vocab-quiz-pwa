@@ -44,13 +44,25 @@ export const ExplainImage = TiptapNode.create({
       width: { default: null, parseHTML: (el: HTMLElement) => Number(el.getAttribute('width')) || null },
       height: { default: null, parseHTML: (el: HTMLElement) => Number(el.getAttribute('height')) || null },
       widthPct: { default: 100, parseHTML: (el: HTMLElement) => Number(el.getAttribute('data-w')) || 100 },
+      // 配置: block = 単独の行(文章は下)/ left = 左に寄せて右に文章が回り込む / right = 右に寄せて左に回り込む
+      align: {
+        default: 'block',
+        parseHTML: (el: HTMLElement) => {
+          const a = el.getAttribute('data-align');
+          return a === 'left' || a === 'right' ? a : 'block';
+        },
+      },
     };
   },
   parseHTML: () => [{ tag: 'img[src^="data:image/"]' }],
   renderHTML: ({ HTMLAttributes }) => {
-    const { src, alt, width, height, widthPct } = HTMLAttributes as Record<string, unknown>;
+    const { src, alt, width, height, widthPct, align } = HTMLAttributes as Record<string, unknown>;
     const pct = Number(widthPct) || 100;
     const natural = Number(width) || 0;
+    const side = align === 'left' || align === 'right' ? align : 'block';
+    // 回り込みは float で行う。画像と文章のあいだの余白もここで決める(印刷の測定と画面を一致させるため)
+    const floatStyle =
+      side === 'left' ? 'float:left;margin:0 1em 0.4em 0;' : side === 'right' ? 'float:right;margin:0 0 0.4em 1em;' : '';
     return [
       'img',
       {
@@ -59,8 +71,9 @@ export const ExplainImage = TiptapNode.create({
         ...(natural ? { width: String(natural) } : {}),
         ...(Number(height) ? { height: String(Number(height)) } : {}),
         'data-w': String(pct),
+        ...(side !== 'block' ? { 'data-align': side } : {}),
         // 原寸より大きくは引き伸ばさない
-        style: `width:${pct}%;${natural ? `max-width:${natural}px;` : ''}height:auto`,
+        style: `${floatStyle}width:${pct}%;${natural ? `max-width:${natural}px;` : ''}height:auto`,
       },
     ];
   },

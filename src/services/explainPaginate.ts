@@ -14,6 +14,7 @@ export interface PaginateResult {
 interface Block {
   html: string;
   keepWithNext: boolean;
+  float?: boolean; // 文章を回り込ませる画像(左寄せ・右寄せ)
 }
 type Item = Block | 'break';
 
@@ -67,26 +68,19 @@ function toItems(html: string, mode: PrintMode): Item[] {
       });
       continue;
     }
-    items.push({ html: el.outerHTML, keepWithNext: /^H[1-6]$/.test(el.tagName) });
+    const align = el.getAttribute('data-align');
+    items.push({
+      html: el.outerHTML,
+      keepWithNext: /^H[1-6]$/.test(el.tagName),
+      float: el.tagName === 'IMG' && (align === 'left' || align === 'right'),
+    });
   }
   return items;
 }
 
-/**
- * ブロックを実際に配置して高さを測り、A4の1ページに収まるように割り振る。
- * - 設問・表・囲みなどのブロックは途中で切らない
- * - 見出しは次のブロックと同じページに置く
- * - 手動の改ページで必ず次のページへ
- */
-export async function paginate(html: string, layout: PrintLayout, mode: PrintMode): Promise<PaginateResult> {
-  if (document.fonts?.ready) await document.fonts.ready;
-
-  const items = toItems(html, mode);
-  const blocks = items.filter((i): i is Block => i !== 'break');
-
+/** ブロックを実際に配置して、それぞれの高さ(下の余白を含む)を測る。画像は読み込みが終わってから測る */
+async function measureBlocks(blocks: Block[], layout: PrintLayout): Promise<number[]> {
   const contentW = (210 - layout.marginLeft - layout.marginRight) * MM_TO_PX;
-  const limit = (297 - layout.marginTop - layout.marginBottom) * MM_TO_PX;
-
   const host = document.createElement('div');
   host.className = 'explain-page-body';
   Object.assign(host.style, {
@@ -100,13 +94,78 @@ export async function paginate(html: string, layout: PrintLayout, mode: PrintMod
   });
   host.innerHTML = blocks.map((b) => b.html).join('');
   document.body.appendChild(host);
-  // 画像は読み込み(デコード)が終わってから高さを測る。先に測ると、ページの割り付けがずれる
+  // 先に測ると、画像の高さが0になって、ページの割り付けがずれる
   await Promise.all(Array.from(host.querySelectorAll('img')).map((img) => img.decode().catch(() => undefined)));
   const heights = Array.from(host.children).map((el) => {
     const mb = parseFloat(getComputedStyle(el).marginBottom || '0') || 0;
     return (el as HTMLElement).offsetHeight + mb;
   });
   host.remove();
+  return heights;
+}
+
+/**
+ * 回り込み画像(左寄せ・右寄せ)を、その横に回り込む文章と1つのまとまりにする。
+ * まとまりは途中で切らないので、ページの境目で、画像と文章が離れない。
+ * 画像の高さ分の文章を、後ろのブロックから集める(手動の改ページでは止める)。
+ */
+function groupFloats(items: Item[], heights: number[]): Item[] {
+  const out: Item[] = [];
+  let bi = 0; // ブロックだけを数えた位置(heights の添字)
+  let i = 0;
+  while (i < items.length) {
+    const it = items[i];
+    if (it === 'break') {
+      out.push(it);
+      i++;
+      continue;
+    }
+    if (!it.float) {
+      out.push(it);
+      i++;
+      bi++;
+      continue;
+    }
+    const imgH = heights[bi] ?? 0;
+    const parts = [it.html];
+    let acc = 0;
+    let j = i + 1;
+    let bj = bi + 1;
+    while (j < items.length && acc < imgH) {
+      const nx = items[j];
+      if (nx === 'break') break;
+      parts.push(nx.html);
+      acc += heights[bj] ?? 0;
+      j++;
+      bj++;
+    }
+    out.push({ html: `<div class="ex-float-group">${parts.join('')}</div>`, keepWithNext: false });
+    i = j;
+    bi = bj;
+  }
+  return out;
+}
+
+/**
+ * ブロックを実際に配置して高さを測り、A4の1ページに収まるように割り振る。
+ * - 設問・表・囲みなどのブロックは途中で切らない
+ * - 見出しは次のブロックと同じページに置く
+ * - 手動の改ページで必ず次のページへ
+ */
+export async function paginate(html: string, layout: PrintLayout, mode: PrintMode): Promise<PaginateResult> {
+  if (document.fonts?.ready) await document.fonts.ready;
+
+  let items = toItems(html, mode);
+  const onlyBlocks = (list: Item[]) => list.filter((i): i is Block => i !== 'break');
+
+  const limit = (297 - layout.marginTop - layout.marginBottom) * MM_TO_PX;
+
+  let heights = await measureBlocks(onlyBlocks(items), layout);
+  if (items.some((i) => i !== 'break' && i.float)) {
+    // 回り込み画像は、横の文章と1つのまとまりにして、測り直す
+    items = groupFloats(items, heights);
+    heights = await measureBlocks(onlyBlocks(items), layout);
+  }
 
   const pages: string[][] = [[]];
   let used = 0;

@@ -58,6 +58,42 @@
   margin: 0.2em 0;
 }
 
+/* ---- 画像の回り込み(左寄せ・右寄せ)。回り込みの範囲が外にはみ出さないよう、囲みごと閉じる ---- */
+.explain-paper img[data-align],
+.explain-page-body img[data-align] {
+  display: block;
+}
+.explain-paper .ProseMirror {
+  display: flow-root;
+}
+.explain-page-body .ex-float-group {
+  display: flow-root;
+  break-inside: avoid;
+}
+.explain-page-body .ex-float-group > * {
+  margin: 0 0 0.6em;
+}
+/* 画像の margin(横の余白)は、画像側のインライン指定を優先する */
+.explain-page-body .ex-float-group > img[data-align] {
+  margin: initial;
+}
+.explain-page-body .ex-q-exp,
+.explain-page-body .ex-reason {
+  display: flow-root;
+}
+.explain-page-body .ex-q-exp img[data-align],
+.explain-page-body .ex-reason img[data-align] {
+  margin: 0.1em 0;
+}
+.explain-page-body .ex-q-exp img[data-align='left'],
+.explain-page-body .ex-reason img[data-align='left'] {
+  margin-right: 1em;
+}
+.explain-page-body .ex-q-exp img[data-align='right'],
+.explain-page-body .ex-reason img[data-align='right'] {
+  margin-left: 1em;
+}
+
 /* ---- 印刷ページの本文: ブロックの間隔は margin-bottom で統一(測定とレイアウトを一致させる) ---- */
 .explain-page-body > * {
   margin: 0 0 0.6em;
