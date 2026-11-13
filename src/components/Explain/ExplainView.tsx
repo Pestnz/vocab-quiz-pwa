@@ -1,46 +1,92 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { JSONContent } from '@tiptap/react';
-import { FilePlus2, FileUp, Trash2, CheckCircle2, Loader2, AlertTriangle, Printer } from 'lucide-react';
+import {
+  FileUp,
+  CheckCircle2,
+  Loader2,
+  AlertTriangle,
+  Printer,
+  Library,
+  Info,
+  RefreshCw,
+  CloudOff,
+} from 'lucide-react';
 import type { LocalExplainDoc, PrintLayout, SpreadSide } from '../../types/explain';
 import { normalizeLayout } from '../../services/explainLayout';
 import {
+  SYNCED_KEYS,
   createEmptyDoc,
-  deleteDocAndOrphanPdf,
+  deleteDocWithTombstone,
   getPdf,
   listDocs,
   saveDoc,
   savePdf,
 } from '../../services/explainDb';
+import { conflictCopyOf, isSyncConfigured, syncExplanations } from '../../services/explanationSync';
+import type { SyncSummary } from '../../services/explanationSync';
 import { PdfViewer } from './PdfViewer';
 import { DocEditor } from './DocEditor';
 import { PrintPreview } from './PrintPreview';
+import { ExplainLibrary } from './ExplainLibrary';
+import { MetaPanel } from './MetaPanel';
 
 type SaveState = 'saved' | 'unsaved' | 'saving' | 'error';
+type View = 'library' | 'work';
+interface SyncUi {
+  status: 'idle' | 'syncing' | 'error';
+  lastAt?: string;
+  message?: string;
+  info?: string;
+}
 
 const SAVE_DEBOUNCE_MS = 1500;
+const AUTO_SYNC_MS = 5 * 60 * 1000;
 const MIN_SPLIT = 0.25;
 const MAX_SPLIT = 0.75;
+
+const isDirty = (d: LocalExplainDoc): boolean => d.baseUpdatedAt === null || d.baseUpdatedAt !== d.syncUpdatedAt;
+
+function summarize(s: SyncSummary): string {
+  const parts: string[] = [];
+  if (s.pushed) parts.push(`送信${s.pushed}`);
+  if (s.pulled) parts.push(`取得${s.pulled}`);
+  if (s.deleted) parts.push(`削除${s.deleted}`);
+  if (s.conflicts) parts.push(`競合${s.conflicts}(競合コピーを作成)`);
+  return parts.length ? parts.join(' / ') : '変更なし';
+}
 
 export const ExplainView: React.FC = () => {
   const [docs, setDocs] = useState<LocalExplainDoc[]>([]);
   const [current, setCurrent] = useState<LocalExplainDoc | null>(null);
   const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [view, setView] = useState<View>('library');
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [ratio, setRatio] = useState(0.5);
   const [narrow, setNarrow] = useState(false);
   const [tab, setTab] = useState<'pdf' | 'editor'>('editor');
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [showMeta, setShowMeta] = useState(false);
+  const [editorKey, setEditorKey] = useState(0);
+  const [sync, setSync] = useState<SyncUi>({ status: 'idle' });
+  const [syncConfigured, setSyncConfigured] = useState(() => isSyncConfigured());
   const closePreview = useCallback(() => setPreviewOpen(false), []);
 
   const docRef = useRef<LocalExplainDoc | null>(null);
+  const docsRef = useRef<LocalExplainDoc[]>([]);
   const dirtyRef = useRef(false);
   const timerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const newFromPdfRef = useRef(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
+  const syncingRef = useRef(false);
 
-  // ---- 保存 ----
+  useEffect(() => {
+    docsRef.current = docs;
+  }, [docs]);
+
+  // ---- 保存(この端末の IndexedDB へ) ----
   const flush = useCallback(async () => {
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current);
@@ -68,7 +114,9 @@ export const ExplainView: React.FC = () => {
     (patch: Partial<LocalExplainDoc>) => {
       const prev = docRef.current;
       if (!prev) return;
-      const next = { ...prev, ...patch, updatedAt: new Date().toISOString() };
+      const now = new Date().toISOString();
+      const touchesSynced = SYNCED_KEYS.some((k) => k in patch);
+      const next = { ...prev, ...patch, updatedAt: now, ...(touchesSynced ? { syncUpdatedAt: now } : {}) };
       docRef.current = next;
       dirtyRef.current = true;
       setCurrent(next);
@@ -80,6 +128,16 @@ export const ExplainView: React.FC = () => {
   );
 
   // ---- 文書を開く ----
+  const loadPdfFor = useCallback(async (doc: LocalExplainDoc) => {
+    if (!doc.pdfKey) {
+      setPdfBlob(null);
+      return;
+    }
+    const stored = await getPdf(doc.pdfKey);
+    // 読み込み中に別の文書へ切り替わっていたら捨てる
+    if (docRef.current?.id === doc.id) setPdfBlob(stored?.blob ?? null);
+  }, []);
+
   const openDoc = useCallback(
     async (doc: LocalExplainDoc | null) => {
       await flush();
@@ -88,19 +146,106 @@ export const ExplainView: React.FC = () => {
       setCurrent(doc);
       setSaveState('saved');
       setPdfBlob(null);
+      setEditorKey((k) => k + 1);
+      setShowMeta(false);
       if (doc) {
         setRatio(doc.splitRatio);
-        if (doc.pdfKey) {
-          const stored = await getPdf(doc.pdfKey);
-          // 読み込み中に別の文書へ切り替わっていたら捨てる
-          if (docRef.current?.id === doc.id) setPdfBlob(stored?.blob ?? null);
-        }
+        await loadPdfFor(doc);
       }
     },
-    [flush]
+    [flush, loadPdfFor]
   );
 
-  // 初期読み込み
+  // ---- GitHub 同期 ----
+  const refreshAfterSync = useCallback(
+    async (before: { id: string; sync: string; base: string | null } | null): Promise<string | null> => {
+      const list = await listDocs();
+      setDocs(list);
+      const cur = docRef.current;
+      if (!cur) return null;
+      const fresh = list.find((d) => d.id === cur.id);
+
+      // 他の端末で削除された
+      if (!fresh) {
+        docRef.current = null;
+        dirtyRef.current = false;
+        setCurrent(null);
+        setPdfBlob(null);
+        setView('library');
+        return '開いていた解説は、他の端末で削除されたため閉じました。';
+      }
+
+      if (dirtyRef.current) {
+        // 同期中に入力があった
+        const syncedThisDoc = before && (fresh.syncUpdatedAt !== before.sync || fresh.baseUpdatedAt !== before.base);
+        if (!syncedThisDoc) return null;
+        if (fresh.syncUpdatedAt === before.sync) {
+          // 送信しただけ(内容は同じ)。同期の記録だけ取り込む。入力はそのまま続けられる
+          docRef.current = { ...cur, baseUpdatedAt: fresh.baseUpdatedAt, remoteSha: fresh.remoteSha, lastSyncedAt: fresh.lastSyncedAt };
+          setCurrent(docRef.current);
+          return null;
+        }
+        // GitHub 側の新しい内容を取り込んだ。入力中の内容は、競合コピーとして残す
+        if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+        dirtyRef.current = false;
+        await saveDoc(conflictCopyOf(cur, '同期中の編集'));
+        docRef.current = fresh;
+        setCurrent(fresh);
+        setEditorKey((k) => k + 1);
+        setSaveState('saved');
+        setDocs(await listDocs());
+        await loadPdfFor(fresh);
+        return '同期中に入力した内容は「競合コピー」として別の解説に残しました。';
+      }
+
+      // 入力していない → 最新の内容に差し替える
+      const changed =
+        fresh.syncUpdatedAt !== cur.syncUpdatedAt || fresh.baseUpdatedAt !== cur.baseUpdatedAt || fresh.remoteSha !== cur.remoteSha;
+      if (changed) {
+        docRef.current = fresh;
+        setCurrent(fresh);
+        if (fresh.syncUpdatedAt !== cur.syncUpdatedAt) {
+          setEditorKey((k) => k + 1);
+          await loadPdfFor(fresh);
+        }
+      }
+      return null;
+    },
+    [loadPdfFor]
+  );
+
+  const runSync = useCallback(async () => {
+    if (syncingRef.current) return;
+    const configured = isSyncConfigured();
+    setSyncConfigured(configured);
+    if (!configured) {
+      setSync({ status: 'idle', message: 'GitHub未設定' });
+      return;
+    }
+    syncingRef.current = true;
+    setSync((s) => ({ ...s, status: 'syncing', message: undefined }));
+    try {
+      await flush();
+      const cur = docRef.current;
+      const before = cur ? { id: cur.id, sync: cur.syncUpdatedAt, base: cur.baseUpdatedAt } : null;
+      const summary = await syncExplanations();
+      const note = await refreshAfterSync(before);
+      const problems = [...summary.errors, ...summary.warnings];
+      setSync({
+        status: summary.errors.length ? 'error' : 'idle',
+        lastAt: new Date().toISOString(),
+        message: [note, ...problems].filter(Boolean).join(' / ') || undefined,
+        info: summarize(summary),
+      });
+    } catch (e) {
+      console.error('Explanation sync failed', e);
+      setSync((s) => ({ ...s, status: 'error', message: (e as Error).message }));
+    } finally {
+      syncingRef.current = false;
+    }
+  }, [flush, refreshAfterSync]);
+
+  // ---- 初期読み込み ----
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -108,13 +253,18 @@ export const ExplainView: React.FC = () => {
         const list = await listDocs();
         if (cancelled) return;
         setDocs(list);
-        if (list.length > 0) await openDoc(list[0]);
+        if (list.length > 0) {
+          await openDoc(list[0]);
+          if (!cancelled) setView('work');
+        }
       } catch (e) {
         console.error('Failed to load explain docs', e);
         setSaveState('error');
       } finally {
         if (!cancelled) setLoaded(true);
       }
+      // 開いたときに一度同期して、他の端末の変更を取り込む
+      if (!cancelled) void runSync();
     })();
     return () => {
       cancelled = true;
@@ -122,10 +272,21 @@ export const ExplainView: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // タブを離れる/閉じる/画面を離れるときに保存
+  // 一定時間ごと(5分)に、未同期の変更があれば同期する
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (docsRef.current.some(isDirty) || dirtyRef.current) void runSync();
+    }, AUTO_SYNC_MS);
+    return () => window.clearInterval(id);
+  }, [runSync]);
+
+  // タブを離れる/閉じる/画面を離れるときに保存(離れるときは同期も試みる)
   useEffect(() => {
     const onHide = () => {
-      if (document.visibilityState === 'hidden') void flush();
+      if (document.visibilityState !== 'hidden') return;
+      void flush().then(() => {
+        if (docsRef.current.some(isDirty) || docRef.current) void runSync();
+      });
     };
     const onUnload = () => void flush();
     document.addEventListener('visibilitychange', onHide);
@@ -135,7 +296,7 @@ export const ExplainView: React.FC = () => {
       window.removeEventListener('beforeunload', onUnload);
       void flush();
     };
-  }, [flush]);
+  }, [flush, runSync]);
 
   // 狭い画面ではPDFとエディターをタブ切替
   useEffect(() => {
@@ -153,29 +314,64 @@ export const ExplainView: React.FC = () => {
     await saveDoc(doc);
     setDocs((prev) => [doc, ...prev]);
     await openDoc(doc);
+    setView('work');
     return doc;
   };
 
-  const handleDelete = async () => {
-    const doc = docRef.current;
-    if (!doc) return;
+  const handleOpenFromLibrary = async (doc: LocalExplainDoc) => {
+    await openDoc(doc);
+    setView('work');
+  };
+
+  const handleDuplicate = async (doc: LocalExplainDoc) => {
+    await flush();
+    const now = new Date().toISOString();
+    const copy: LocalExplainDoc = {
+      ...doc,
+      id: crypto.randomUUID(),
+      title: `${doc.title || '無題'} (コピー)`,
+      status: 'draft',
+      createdAt: now,
+      updatedAt: now,
+      syncUpdatedAt: now,
+      baseUpdatedAt: null,
+      remoteSha: null,
+      lastSyncedAt: null,
+    };
+    await saveDoc(copy);
+    setDocs(await listDocs());
+  };
+
+  const handleDelete = async (doc: LocalExplainDoc) => {
     const ok = window.confirm(
-      `「${doc.title}」を削除しますか?\nこの端末の解説本文と、保存したPDFが消えます。元に戻せません。`
+      `「${doc.title || '無題'}」を削除しますか?\nこの端末の解説本文と、保存したPDFが消えます。` +
+        `GitHub同期を使っている場合は、GitHub上の解説も削除されます(他の端末からも消えます)。元に戻せません。`
     );
     if (!ok) return;
-    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    dirtyRef.current = false;
-    await deleteDocAndOrphanPdf(doc.id);
-    const rest = docs.filter((d) => d.id !== doc.id);
-    setDocs(rest);
-    await openDoc(rest[0] ?? null);
+    if (docRef.current?.id === doc.id) {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      dirtyRef.current = false;
+      docRef.current = null;
+      setCurrent(null);
+      setPdfBlob(null);
+      setSaveState('saved');
+    }
+    await deleteDocWithTombstone(doc.id);
+    setDocs(await listDocs());
+    void runSync();
   };
 
   const handlePickFile = () => fileInputRef.current?.click();
+  const handleNewFromPdf = () => {
+    newFromPdfRef.current = true;
+    fileInputRef.current?.click();
+  };
 
   const handleFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
+    const asNew = newFromPdfRef.current;
+    newFromPdfRef.current = false;
     if (!file) return;
     if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
       window.alert('PDFファイルを選んでください。');
@@ -183,7 +379,7 @@ export const ExplainView: React.FC = () => {
     }
     try {
       const stored = await savePdf(file);
-      if (!docRef.current) {
+      if (asNew || !docRef.current) {
         await handleNewDoc(file.name.replace(/\.pdf$/i, ''));
       }
       const sameFile = docRef.current?.pdfKey === stored.key;
@@ -224,7 +420,9 @@ export const ExplainView: React.FC = () => {
   };
 
   // ---- 表示 ----
-  const statusBadge = (() => {
+  const unsyncedCount = docs.filter(isDirty).length;
+
+  const saveBadge = (() => {
     switch (saveState) {
       case 'saved':
         return (
@@ -252,6 +450,39 @@ export const ExplainView: React.FC = () => {
     }
   })();
 
+  const syncBadge = (() => {
+    if (!syncConfigured) {
+      return (
+        <span className="flex items-center gap-1 text-slate-500" title="設定画面でGitHubのトークン・リポジトリを入力すると、解説が同期されます">
+          <CloudOff className="w-3.5 h-3.5" />
+          GitHub未設定
+        </span>
+      );
+    }
+    if (sync.status === 'syncing') {
+      return (
+        <span className="flex items-center gap-1 text-slate-300">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          同期中…
+        </span>
+      );
+    }
+    if (sync.status === 'error') {
+      return (
+        <span className="flex items-center gap-1 text-rose-400 max-w-[280px] truncate" title={sync.message}>
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          同期エラー: {sync.message}
+        </span>
+      );
+    }
+    if (unsyncedCount > 0) return <span className="text-amber-400">未同期 {unsyncedCount}件</span>;
+    return (
+      <span className="text-emerald-400" title={sync.message ?? sync.info}>
+        同期済み{sync.info ? `(${sync.info})` : ''}
+      </span>
+    );
+  })();
+
   const topBtn =
     'flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 cursor-pointer disabled:opacity-40';
 
@@ -277,8 +508,25 @@ export const ExplainView: React.FC = () => {
   const layout = normalizeLayout(current?.layout);
 
   const editorPane = current ? (
-    <DocEditor key={current.id} initialContent={current.content} layout={layout} onChange={handleEditorChange} />
+    <DocEditor
+      key={`${current.id}:${editorKey}`}
+      initialContent={current.content}
+      layout={layout}
+      onChange={handleEditorChange}
+    />
   ) : null;
+
+  const syncButton = (
+    <button
+      className={topBtn}
+      onClick={() => void runSync()}
+      disabled={sync.status === 'syncing'}
+      title="GitHubと同期する(5分ごと・画面を離れるときにも自動で行います)"
+    >
+      <RefreshCw className={`w-3.5 h-3.5 ${sync.status === 'syncing' ? 'animate-spin' : ''}`} />
+      同期
+    </button>
+  );
 
   return (
     <div className="flex flex-col w-full" style={{ height: 'calc(100dvh - 5.5rem)' }}>
@@ -295,80 +543,64 @@ export const ExplainView: React.FC = () => {
 
       {/* 上部バー */}
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-800 bg-slate-900">
-        <select
-          value={current?.id ?? ''}
-          onChange={(e) => {
-            const next = docs.find((d) => d.id === e.target.value) ?? null;
-            void openDoc(next);
+        <button
+          className={`${topBtn} ${view === 'library' ? '!bg-slate-600' : ''}`}
+          onClick={() => {
+            void flush();
+            setView('library');
           }}
-          disabled={docs.length === 0}
-          className="max-w-[200px] bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-md px-2 py-1.5"
-          aria-label="解説を選ぶ"
         >
-          {docs.length === 0 && <option value="">(解説なし)</option>}
-          {docs.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.title || '(無題)'}
-            </option>
-          ))}
-        </select>
-
-        <button className={topBtn} onClick={() => void handleNewDoc()}>
-          <FilePlus2 className="w-3.5 h-3.5" />
-          新規
+          <Library className="w-3.5 h-3.5" />
+          ライブラリ
         </button>
 
-        {current && (
-          <input
-            value={current.title}
-            onChange={(e) => patchDoc({ title: e.target.value })}
-            placeholder="タイトル(例: 令和7年度 千葉県 本検査 英語)"
-            className="flex-1 min-w-[160px] bg-slate-800 border border-slate-700 text-slate-100 text-xs rounded-md px-2 py-1.5"
-            aria-label="解説のタイトル"
-          />
+        {view === 'work' && current && (
+          <>
+            <input
+              value={current.title}
+              onChange={(e) => patchDoc({ title: e.target.value })}
+              placeholder="タイトル(例: 令和7年度 千葉県 本検査 英語)"
+              className="flex-1 min-w-[160px] bg-slate-800 border border-slate-700 text-slate-100 text-xs rounded-md px-2 py-1.5"
+              aria-label="解説のタイトル"
+            />
+            <button className={`${topBtn} ${showMeta ? '!bg-slate-600' : ''}`} onClick={() => setShowMeta((v) => !v)} title="年度・県・区分・状態">
+              <Info className="w-3.5 h-3.5" />
+              情報
+            </button>
+            <button className={topBtn} onClick={handlePickFile}>
+              <FileUp className="w-3.5 h-3.5" />
+              PDFを開く
+            </button>
+            <button className={`${topBtn} !bg-emerald-700 hover:!bg-emerald-600 !border-emerald-600`} onClick={() => setPreviewOpen(true)}>
+              <Printer className="w-3.5 h-3.5" />
+              印刷プレビュー
+            </button>
+          </>
         )}
 
-        <button className={topBtn} onClick={handlePickFile}>
-          <FileUp className="w-3.5 h-3.5" />
-          PDFを開く
-        </button>
-        {current && (
-          <button className={`${topBtn} !bg-emerald-700 hover:!bg-emerald-600 !border-emerald-600`} onClick={() => setPreviewOpen(true)}>
-            <Printer className="w-3.5 h-3.5" />
-            印刷プレビュー
-          </button>
-        )}
-        {current && (
-          <button className={`${topBtn} hover:!bg-rose-900/60`} onClick={() => void handleDelete()}>
-            <Trash2 className="w-3.5 h-3.5" />
-            削除
-          </button>
-        )}
-        <div className="ml-auto text-[11px]">{statusBadge}</div>
+        <div className="ml-auto flex items-center gap-3 text-[11px]">
+          {view === 'work' && current && saveBadge}
+          {syncBadge}
+          {syncButton}
+        </div>
       </div>
+
+      {view === 'work' && current && showMeta && <MetaPanel doc={current} onChange={patchDoc} />}
 
       {/* 本体 */}
       {!loaded ? (
         <div className="flex-1 flex items-center justify-center text-sm text-slate-400">読み込み中…</div>
-      ) : !current ? (
-        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center text-sm text-slate-400 px-4">
-          <p>解説がまだありません。</p>
-          <div className="flex gap-2">
-            <button
-              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold cursor-pointer"
-              onClick={() => void handleNewDoc()}
-            >
-              新しい解説を作る
-            </button>
-            <button
-              className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs font-semibold cursor-pointer"
-              onClick={handlePickFile}
-            >
-              PDFを選んで始める
-            </button>
-          </div>
-          <p className="text-[11px] text-slate-500">解説とPDFは、この端末の中だけに保存されます(GitHubには送られません)。</p>
-        </div>
+      ) : view === 'library' || !current ? (
+        <ExplainLibrary
+          docs={docs}
+          currentId={current?.id ?? null}
+          syncConfigured={syncConfigured}
+          onOpen={(d) => void handleOpenFromLibrary(d)}
+          onNew={() => void handleNewDoc()}
+          onNewFromPdf={handleNewFromPdf}
+          onDuplicate={(d) => void handleDuplicate(d)}
+          onDelete={(d) => void handleDelete(d)}
+        />
       ) : narrow ? (
         <div className="flex-1 min-h-0 flex flex-col">
           <div className="flex border-b border-slate-800 bg-slate-900 text-xs">
