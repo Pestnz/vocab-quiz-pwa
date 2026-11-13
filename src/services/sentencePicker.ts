@@ -85,7 +85,6 @@ const PRIMARY_MODEL = 'gemini-3.6-flash';
 const FALLBACK_MODELS = [
   'gemini-3.6-flash',
   'gemini-2.5-flash',
-  'gemini-2.5-pro',
 ];
 
 export interface GenerateAiWordsOptions {
