@@ -7,7 +7,7 @@ export const DEFAULT_PRINT_LAYOUT: PrintLayout = {
   marginBottom: 20,
   marginLeft: 20,
   marginRight: 20,
-  fontSizePt: 10.5,
+  fontSizePt: 12,
   lineHeight: 1.8,
   headerText: '',
   showHeader: true,
