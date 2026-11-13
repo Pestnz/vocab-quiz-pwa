@@ -42,8 +42,9 @@ export interface ChoiceExplanation {
 
 export interface Question {
   id: string;
-  order: number; // 大問内の並び順(小さい順)
-  label: string; // '(1)' '② ' 'No.1' など
+  order: number; // 大問内の並び順(小さい順。小数でもよい)
+  parentId?: string; // 小問のとき、親の設問のID(「(1)」の下の「①」など。1段まで)
+  label: string; // '(1)' '② ' 'No.1' など。小問では '①' のように自分の分だけ入れる
   type: QuestionType;
   prompt?: string; // 設問の要点(任意。著作物の転載は最小限に)
   correctAnswer: string; // 正解(例: 'ウ' / 'ア→エ→イ→ウ→オ')

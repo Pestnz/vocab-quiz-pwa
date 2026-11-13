@@ -91,6 +91,7 @@ function normalizeQuestion(raw: unknown, index: number): Question | null {
   return {
     id: str(q.id) || newId(),
     order: num(q.order, index),
+    parentId: typeof q.parentId === 'string' && q.parentId !== '' ? q.parentId : undefined,
     label: str(q.label),
     type,
     prompt: typeof q.prompt === 'string' ? q.prompt : undefined,
@@ -146,6 +147,34 @@ export function isRichEmpty(doc: JSONContent | null | undefined): boolean {
   return !walk(doc);
 }
 
+// ---------------- 小問(「(1)」の下の「①」など) ----------------
+
+/** ①②③…⑳。それ以降は (21) のような括弧つき数字 */
+export const circled = (n: number): string => (n >= 1 && n <= 20 ? String.fromCharCode(0x2460 + n - 1) : `(${n})`);
+
+/**
+ * 設問を、親 → 小問 の順に並べて、字下げの深さをつける。
+ * 親が見つからない小問(親だけが削除された場合など)は、通常の設問として扱う。
+ */
+export function orderedWithDepth(questions: Question[]): Array<{ q: Question; depth: 0 | 1; parent?: Question }> {
+  const sorted = [...questions].sort(bySectionOrder);
+  const byId = new Map(sorted.map((q) => [q.id, q]));
+  const isChild = (q: Question): boolean => Boolean(q.parentId && byId.has(q.parentId) && !byId.get(q.parentId)?.parentId);
+  const out: Array<{ q: Question; depth: 0 | 1; parent?: Question }> = [];
+  for (const q of sorted) {
+    if (isChild(q)) continue;
+    out.push({ q, depth: 0 });
+    for (const c of sorted) if (c.parentId === q.id && isChild(c)) out.push({ q: c, depth: 1, parent: q });
+  }
+  return out;
+}
+
+/** 印刷・一覧に出す番号。小問は親の番号とつなげる(例: 「(1)」+「①」→「(1)①」) */
+export function fullLabel(q: Question, all: Question[]): string {
+  const parent = q.parentId ? all.find((x) => x.id === q.parentId) : undefined;
+  return parent && !parent.parentId ? `${parent.label}${q.label}` : q.label;
+}
+
 export interface MissingReason {
   questionId: string;
   questionLabel: string;
@@ -156,11 +185,16 @@ export interface MissingReason {
 /** 選択問題で、理由が未入力の選択肢の一覧(全選択肢に理由が必要) */
 export function missingChoiceReasons(section: ExamSection): MissingReason[] {
   const out: MissingReason[] = [];
-  for (const q of [...section.questions].sort(bySectionOrder)) {
+  for (const { q } of orderedWithDepth(section.questions)) {
     if (q.type !== 'choice') continue;
     for (const c of q.choices ?? []) {
       if (isRichEmpty(c.reason)) {
-        out.push({ questionId: q.id, questionLabel: q.label || '(番号なし)', choiceId: c.id, choiceLabel: c.label });
+        out.push({
+          questionId: q.id,
+          questionLabel: fullLabel(q, section.questions) || '(番号なし)',
+          choiceId: c.id,
+          choiceLabel: c.label,
+        });
       }
     }
   }
@@ -173,10 +207,65 @@ export function countMissingReasons(sections: ExamSection[]): number {
 
 // ---------------- 並べ替え・削除 ----------------
 
-/** order を 0,1,2… に振り直す(並べ替えの後に使う) */
+/** order を 0,1,2… に振り直す(並べ替えの後に使う)。親 → 小問 のまとまりは保つ */
 export function renumberQuestions(questions: Question[]): Question[] {
   const stamp = nowIso();
-  return [...questions].sort(bySectionOrder).map((q, i) => (q.order === i ? q : { ...q, order: i, updatedAt: stamp }));
+  return orderedWithDepth(questions).map(({ q }, i) => (q.order === i ? q : { ...q, order: i, updatedAt: stamp }));
+}
+
+/**
+ * 設問(または小問)を、同じ階層の前後と入れ替える。
+ * 親を動かすと小問も一緒に動き、小問は同じ親の下だけで動く。動かせなければ null。
+ */
+export function moveQuestionInGroup(questions: Question[], id: string, dir: -1 | 1): Question[] | null {
+  const flat = orderedWithDepth(questions);
+  const target = flat.find((x) => x.q.id === id);
+  if (!target) return null;
+
+  // 階層ごとに「かたまり」にする: 親は [親, 小問…]、小問は [小問] 1つ
+  const groups: Question[][] = [];
+  for (const { q, depth } of flat) {
+    if (depth === 0) groups.push([q]);
+    else groups[groups.length - 1].push(q);
+  }
+
+  let nextGroups: Question[][];
+  if (target.depth === 0) {
+    const i = groups.findIndex((g) => g[0].id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= groups.length) return null;
+    nextGroups = [...groups];
+    [nextGroups[i], nextGroups[j]] = [nextGroups[j], nextGroups[i]];
+  } else {
+    const gi = groups.findIndex((g) => g.some((x) => x.id === id));
+    const g = groups[gi];
+    const i = g.findIndex((x) => x.id === id);
+    const j = i + dir;
+    if (i < 1 || j < 1 || j >= g.length) return null; // 先頭は親。小問は親より上へは動かせない
+    const swapped = [...g];
+    [swapped[i], swapped[j]] = [swapped[j], swapped[i]];
+    nextGroups = groups.map((x, k) => (k === gi ? swapped : x));
+  }
+
+  const stamp = nowIso();
+  const orderOf = new Map<string, number>();
+  nextGroups.flat().forEach((q, k) => orderOf.set(q.id, k));
+  return questions.map((q) => {
+    const k = orderOf.get(q.id);
+    return k === undefined || q.order === k ? q : { ...q, order: k, updatedAt: stamp };
+  });
+}
+
+/** 親の最後の小問の、すぐ後ろに入る order(間に入れるので、ほかの設問の order は動かさない) */
+export function orderAfterGroup(questions: Question[], parentId: string): number {
+  const flat = orderedWithDepth(questions);
+  const idx = flat.findIndex((x) => x.q.id === parentId);
+  if (idx < 0) return (flat[flat.length - 1]?.q.order ?? -1) + 1;
+  let last = idx;
+  while (last + 1 < flat.length && flat[last + 1].depth === 1 && flat[last + 1].parent?.id === parentId) last++;
+  const prev = flat[last].q.order;
+  const next = flat[last + 1]?.q.order;
+  return next === undefined ? prev + 1 : (prev + next) / 2;
 }
 
 export function renumberSections(sections: ExamSection[]): ExamSection[] {

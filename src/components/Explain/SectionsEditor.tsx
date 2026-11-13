@@ -9,8 +9,13 @@ import {
   countMissingReasons,
   createQuestion,
   createSection,
+  circled,
+  fullLabel,
   hasAnyQuestionContent,
   missingChoiceReasons,
+  moveQuestionInGroup,
+  orderAfterGroup,
+  orderedWithDepth,
   renumberQuestions,
   renumberSections,
 } from '../../services/explainSections';
@@ -87,8 +92,9 @@ export const SectionsEditor: React.FC<SectionsEditorProps> = ({ sections, delete
   const addQuestion = (sec: ExamSection) => {
     const order = sec.questions.length > 0 ? Math.max(...sec.questions.map((q) => q.order)) + 1 : 0;
     // 「(3)」のような番号の最大値の次を提案する(途中の設問を消しても重複しない)
-    const used = sec.questions.map((x) => Number(/\((\d+)\)/.exec(x.label)?.[1] ?? 0));
-    const q = createQuestion(order, `(${Math.max(sec.questions.length, ...used) + 1})`, 'choice');
+    const top = sec.questions.filter((x) => !x.parentId); // 小問(①など)は数えない
+    const used = top.map((x) => Number(/\((\d+)\)/.exec(x.label)?.[1] ?? 0));
+    const q = createQuestion(order, `(${Math.max(top.length, ...used) + 1})`, 'choice');
     mapQuestions(sec.id, (qs) => [...qs, q]);
     setNewQuestionId(q.id);
   };
@@ -96,24 +102,35 @@ export const SectionsEditor: React.FC<SectionsEditorProps> = ({ sections, delete
   const updateQuestion = (secId: string, qid: string, patch: Partial<Question>) =>
     mapQuestions(secId, (qs) => qs.map((q) => (q.id === qid ? { ...q, ...patch, updatedAt: nowIso() } : q)));
 
+  // 小問(「(1)」の下の「①」など)を、親の最後の小問のあとに追加する
+  const addSubQuestion = (sec: ExamSection, parent: Question) => {
+    const siblings = sec.questions.filter((x) => x.parentId === parent.id).length;
+    const q = { ...createQuestion(orderAfterGroup(sec.questions, parent.id), circled(siblings + 1), 'choice'), parentId: parent.id };
+    mapQuestions(sec.id, (qs) => [...qs, q]);
+    setNewQuestionId(q.id);
+  };
+
   const deleteQuestion = (sec: ExamSection, q: Question) => {
-    const ok = window.confirm(`設問「${q.label || '(番号なし)'}」を削除しますか?\nGitHub同期を使っている場合は、他の端末からも消えます。元に戻せません。`);
+    const children = sec.questions.filter((x) => x.parentId === q.id);
+    const name = fullLabel(q, sec.questions) || '(番号なし)';
+    const ok = window.confirm(
+      `設問「${name}」を削除しますか?` +
+        (children.length > 0 ? `\n中の小問 ${children.length} 件も消えます。` : '') +
+        `\nGitHub同期を使っている場合は、他の端末からも消えます。元に戻せません。`
+    );
     if (!ok) return;
+    const removed = new Set([q.id, ...children.map((c) => c.id)]);
     mapQuestions(
       sec.id,
-      (qs) => renumberQuestions(qs.filter((x) => x.id !== q.id)),
-      { deletedItemIds: [...new Set([...sec.deletedItemIds, q.id])], updatedAt: nowIso() }
+      (qs) => renumberQuestions(qs.filter((x) => !removed.has(x.id))),
+      { deletedItemIds: [...new Set([...sec.deletedItemIds, ...removed])], updatedAt: nowIso() }
     );
   };
 
+  // 親は小問と一緒に、小問は同じ親の下だけで動く
   const moveQuestion = (sec: ExamSection, qid: string, dir: -1 | 1) => {
-    const qs = [...sec.questions].sort(bySectionOrder);
-    const i = qs.findIndex((q) => q.id === qid);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= qs.length) return;
-    [qs[i], qs[j]] = [qs[j], qs[i]];
-    const stamp = nowIso();
-    mapQuestions(sec.id, () => qs.map((q, k) => (q.order === k ? q : { ...q, order: k, updatedAt: stamp })));
+    const next = moveQuestionInGroup(sec.questions, qid, dir);
+    if (next) mapQuestions(sec.id, () => next);
   };
 
   if (sorted.length === 0) {
@@ -146,7 +163,7 @@ export const SectionsEditor: React.FC<SectionsEditorProps> = ({ sections, delete
   }
 
   const missing = selected ? missingChoiceReasons(selected) : [];
-  const orderedQs = selected ? [...selected.questions].sort(bySectionOrder) : [];
+  const orderedQs = selected ? orderedWithDepth(selected.questions) : [];
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-slate-900">
@@ -270,16 +287,20 @@ export const SectionsEditor: React.FC<SectionsEditorProps> = ({ sections, delete
 
           {/* 設問 */}
           <div className="space-y-2">
-            {orderedQs.map((q, i) => (
+            {orderedQs.map(({ q, depth, parent }) => (
               <QuestionCard
                 key={q.id}
                 question={q}
+                depth={depth}
+                parentLabel={parent?.label}
+                childCount={selected.questions.filter((x) => x.parentId === q.id).length}
                 defaultOpen={q.id === newQuestionId}
-                canMoveUp={i > 0}
-                canMoveDown={i < orderedQs.length - 1}
+                canMoveUp={moveQuestionInGroup(selected.questions, q.id, -1) !== null}
+                canMoveDown={moveQuestionInGroup(selected.questions, q.id, 1) !== null}
                 onChange={(patch) => updateQuestion(selected.id, q.id, patch)}
                 onMove={(dir) => moveQuestion(selected, q.id, dir)}
                 onDelete={() => deleteQuestion(selected, q)}
+                onAddSub={depth === 0 ? () => addSubQuestion(selected, q) : undefined}
               />
             ))}
             <button

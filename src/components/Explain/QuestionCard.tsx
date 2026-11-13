@@ -12,12 +12,16 @@ import { RichField } from './RichField';
 
 interface QuestionCardProps {
   question: Question;
+  depth?: 0 | 1; // 1 = 小問(字下げして表示)
+  parentLabel?: string; // 小問のとき、親の番号(「(1)」など)。番号欄の手前に薄く表示する
+  childCount?: number; // 親のとき、小問の数
   defaultOpen?: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
   onChange: (patch: Partial<Question>) => void;
   onMove: (dir: -1 | 1) => void;
   onDelete: () => void;
+  onAddSub?: () => void; // 親のとき「小問を追加」
 }
 
 const field = 'bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100';
@@ -26,12 +30,16 @@ const lab = 'block text-[11px] text-slate-400 mb-0.5';
 
 export const QuestionCard: React.FC<QuestionCardProps> = ({
   question: q,
+  depth = 0,
+  parentLabel,
+  childCount = 0,
   defaultOpen = false,
   canMoveUp,
   canMoveDown,
   onChange,
   onMove,
   onDelete,
+  onAddSub,
 }) => {
   const [open, setOpen] = useState(defaultOpen);
   const choices = q.choices ?? [];
@@ -50,16 +58,25 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   const iconBtn = 'p-1 rounded text-slate-400 hover:text-slate-100 hover:bg-slate-700 disabled:opacity-30 cursor-pointer';
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-900/70">
+    <div
+      className={`rounded-lg border bg-slate-900/70 ${
+        depth === 1 ? 'ml-6 border-slate-700 border-l-4 border-l-emerald-700' : 'border-slate-700'
+      }`}
+    >
       <div className="flex flex-wrap items-center gap-2 px-2 py-1.5">
         <button className={iconBtn} onClick={() => setOpen((v) => !v)} title={open ? '閉じる' : '開く'}>
           {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </button>
+        {depth === 1 && parentLabel && (
+          <span className="text-xs text-slate-500 -mr-1" title="親の設問の番号(印刷では、この後ろに小問の番号が続きます)">
+            {parentLabel}
+          </span>
+        )}
         <input
           value={q.label}
           onChange={(e) => onChange({ label: e.target.value })}
-          placeholder="(1)"
-          aria-label="設問番号"
+          placeholder={depth === 1 ? '①' : '(1)'}
+          aria-label={depth === 1 ? '小問の番号' : '設問番号'}
           className={`${field} w-16`}
         />
         <select value={q.type} onChange={(e) => changeType(e.target.value as QuestionType)} aria-label="設問の形式" className={field}>
@@ -97,6 +114,16 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
           </span>
         )}
         <span className="ml-auto flex items-center">
+          {depth === 0 && onAddSub && (
+            <button
+              className="flex items-center gap-0.5 px-1.5 py-0.5 mr-1 rounded text-[11px] text-emerald-300 hover:bg-slate-700 cursor-pointer"
+              onClick={onAddSub}
+              title="この設問の下に、小問(①②…)を追加"
+            >
+              <Plus className="w-3 h-3" />
+              小問{childCount > 0 ? `(${childCount})` : ''}
+            </button>
+          )}
           <button className={iconBtn} disabled={!canMoveUp} onClick={() => onMove(-1)} title="上へ">
             <ArrowUp className="w-3.5 h-3.5" />
           </button>

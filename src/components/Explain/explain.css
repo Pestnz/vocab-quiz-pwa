@@ -72,6 +72,7 @@
   padding: 0.4em 0.7em;
   break-inside: avoid;
 }
+.explain-page-body .ex-sub { margin-left: 1.8em; border-left: 3px solid #666; }
 .explain-page-body .ex-q > * { margin: 0; }
 .explain-page-body .ex-q > * + * { margin-top: 0.4em; }
 .explain-page-body .ex-q-head { font-weight: 700; }

@@ -1,5 +1,5 @@
 import type { ExamSection, LocalExplainDoc, Question } from '../types/explain';
-import { bySectionOrder, isRichEmpty } from './explainSections';
+import { bySectionOrder, fullLabel, isRichEmpty, orderedWithDepth } from './explainSections';
 import { docToHtml } from './explainPaginate';
 
 export type PrintScope = 'all' | 'answers' | 'free';
@@ -9,10 +9,11 @@ const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ESC[c]);
 /** 入力欄の文字(プレーンテキスト)を、安全にHTMLにする。改行は <br> に */
 const plain = (s: string): string => esc(s).replace(/\r?\n/g, '<br>');
 
-function questionHtml(q: Question): string {
+function questionHtml(q: Question, label: string, depth: 0 | 1): string {
   const parts: string[] = [];
 
-  const head: string[] = [`<span class="ex-q-label">${esc(q.label || '')}</span>`];
+  // 小問は、親の番号とつなげて出す(例: 「(1)」+「①」→「(1)①」)
+  const head: string[] = [`<span class="ex-q-label">${esc(label)}</span>`];
   if (q.correctAnswer.trim()) head.push(`<span class="ex-q-ans">正解: ${esc(q.correctAnswer)}</span>`);
   if (q.points !== undefined) head.push(`<span class="ex-q-pt">(${esc(String(q.points))}点)</span>`);
   parts.push(`<div class="ex-q-head">${head.join(' ')}</div>`);
@@ -52,14 +53,14 @@ function questionHtml(q: Question): string {
   if (q.teacherNote?.trim()) teacher.push(`<p><b>講師メモ</b> ${plain(q.teacherNote)}</p>`);
   if (teacher.length > 0) parts.push(`<div data-teacher-note="true">${teacher.join('')}</div>`);
 
-  return `<div class="ex-q">${parts.join('')}</div>`;
+  return `<div class="ex-q${depth === 1 ? ' ex-sub' : ''}">${parts.join('')}</div>`;
 }
 
 function sectionHtml(s: ExamSection): string {
   const title = `大問${s.number || ''}${s.title ? ` ${s.title}` : ''}`;
   const out: string[] = [`<h2>${esc(title)}</h2>`];
   if (s.note?.trim()) out.push(`<div data-teacher-note="true"><p>${plain(s.note)}</p></div>`);
-  for (const q of [...s.questions].sort(bySectionOrder)) out.push(questionHtml(q));
+  for (const { q, depth } of orderedWithDepth(s.questions)) out.push(questionHtml(q, fullLabel(q, s.questions), depth));
   return out.join('');
 }
 
