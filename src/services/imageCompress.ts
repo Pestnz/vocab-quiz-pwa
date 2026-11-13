@@ -10,6 +10,27 @@ export interface CropImage {
   height: number;
   bytes: number; // 画像データのバイト数(base64化の前)
   mime: 'image/webp' | 'image/jpeg';
+  /** 文字の読み取り(OCR)用の、解説には埋め込まない高解像度版(JPEG)。メモリ上だけで、保存・同期はしない */
+  ocr?: { base64: string; width: number; height: number };
+}
+
+/** OCR用: 長辺 maxEdge px 以下のJPEG(圧縮しすぎず、文字が読める画質を保つ) */
+export async function canvasToOcrJpeg(source: HTMLCanvasElement, maxEdge = 2000): Promise<NonNullable<CropImage['ocr']>> {
+  const scale = Math.min(1, maxEdge / Math.max(source.width, source.height));
+  const w = Math.max(1, Math.round(source.width * scale));
+  const h = Math.max(1, Math.round(source.height * scale));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  if (!ctx) throw new Error('画像を作れませんでした。');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(source, 0, 0, w, h);
+  const blob = await toBlob(c, 'image/jpeg', 0.88);
+  const dataUrl = await blobToDataUrl(blob);
+  return { base64: dataUrl.slice(dataUrl.indexOf(',') + 1), width: w, height: h };
 }
 
 export const DEFAULT_MAX_EDGE = 1000;

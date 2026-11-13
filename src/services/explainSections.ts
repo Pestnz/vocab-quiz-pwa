@@ -6,6 +6,7 @@ import type {
   QuestionType,
   SectionKind,
 } from '../types/explain';
+import { normalizePassages, passagesToText } from './explainPassages';
 
 export const SECTION_KIND_LABEL: Record<SectionKind, string> = {
   listening: 'リスニング',
@@ -123,7 +124,7 @@ export function normalizeSections(raw: unknown): ExamSection[] {
       kind,
       updatedAt: str(s.updatedAt) || nowIso(),
       deletedItemIds: Array.isArray(s.deletedItemIds) ? s.deletedItemIds.filter((d): d is string => typeof d === 'string') : [],
-      passages: Array.isArray(s.passages) ? s.passages : [],
+      passages: normalizePassages(s.passages),
       questions: (Array.isArray(s.questions) ? s.questions : [])
         .map(normalizeQuestion)
         .filter((q): q is Question => q !== null),
@@ -305,7 +306,7 @@ export function sectionsToText(sections: ExamSection[]): string {
   };
   const out: string[] = [];
   for (const s of sections) {
-    out.push(`大問${s.number}`, s.title ?? '', s.note ?? '');
+    out.push(`大問${s.number}`, s.title ?? '', s.note ?? '', passagesToText(s.passages));
     for (const q of s.questions) {
       out.push(q.label, q.prompt ?? '', q.correctAnswer, richText(q.explanation), q.scoringNotes ?? '', q.commonErrors ?? '', q.teacherNote ?? '');
       out.push(...(q.modelAnswers ?? []));

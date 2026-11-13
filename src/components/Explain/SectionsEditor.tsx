@@ -22,6 +22,8 @@ import {
 import { QuestionCard } from './QuestionCard';
 import { AnswerKeyImport } from './AnswerKeyImport';
 import { AiStatusPanel } from './AiStatusPanel';
+import { PassageEditor } from './PassageEditor';
+import { countUnreviewed } from '../../services/explainPassages';
 
 interface SectionsEditorProps {
   sections: ExamSection[];
@@ -41,6 +43,7 @@ export const SectionsEditor: React.FC<SectionsEditorProps> = ({ sections, delete
 
   const selected = sorted.find((s) => s.id === selectedId) ?? sorted[0] ?? null;
   const totalMissing = countMissingReasons(sections);
+  const totalUnreviewed = sections.reduce((n, s) => n + countUnreviewed(s.passages), 0);
 
   const commit = (nextSections: ExamSection[], nextDeleted: string[] = deletedSectionIds) =>
     onChange({ sections: nextSections, deletedSectionIds: nextDeleted });
@@ -212,6 +215,11 @@ export const SectionsEditor: React.FC<SectionsEditorProps> = ({ sections, delete
         >
           正答表を取り込む
         </button>
+        {totalUnreviewed > 0 && (
+          <span className="shrink-0 pl-2 text-[11px] text-amber-400" title="本文で、確認していない文(AIの下書きなど)の数">
+            本文 未確認 {totalUnreviewed}文
+          </span>
+        )}
         <span className="shrink-0 pl-2 text-[11px]">
           {totalMissing > 0 ? (
             <span className="flex items-center gap-1 text-amber-400">
@@ -308,6 +316,17 @@ export const SectionsEditor: React.FC<SectionsEditorProps> = ({ sections, delete
               className={`${field} w-full`}
             />
           </div>
+
+          {/* 本文(長文): 英文を文ごとに管理し、全訳をつける */}
+          <PassageEditor
+            passages={selected.passages}
+            onChange={(passages, deleted) =>
+              updateSection(selected.id, {
+                passages,
+                deletedItemIds: deleted.length > 0 ? [...new Set([...selected.deletedItemIds, ...deleted])] : selected.deletedItemIds,
+              })
+            }
+          />
 
           {/* 設問 */}
           <div className="space-y-2">

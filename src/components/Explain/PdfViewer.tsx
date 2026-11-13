@@ -4,7 +4,7 @@ import type { PDFDocumentProxy, PDFDocumentLoadingTask, RenderTask } from 'pdfjs
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, MoveHorizontal, Crop, Loader2 } from 'lucide-react';
 import type { SpreadSide } from '../../types/explain';
-import { compressCanvas } from '../../services/imageCompress';
+import { canvasToOcrJpeg, compressCanvas } from '../../services/imageCompress';
 import type { CropImage } from '../../services/imageCompress';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
@@ -150,7 +150,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       const pdfW = rect.w / zoom;
       const pdfH = rect.h / zoom;
       const longPt = Math.max(pdfW, pdfH);
-      const s = Math.min(4, Math.max(0.5, Math.min(1400, longPt * 3) / longPt)); // 長辺が最大1400px(圧縮前)
+      const s = Math.min(4, Math.max(0.5, Math.min(2000, longPt * 3) / longPt)); // 長辺が最大2000px(圧縮前。文字の読み取り用にも使う)
       const viewport = pdfPage.getViewport({ scale: s, offsetX: -pdfX * s, offsetY: -pdfY * s });
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.ceil(pdfW * s));
@@ -161,6 +161,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       await pdfPage.render({ canvas, canvasContext: ctx, viewport }).promise;
       const img = await compressCanvas(canvas);
+      img.ocr = await canvasToOcrJpeg(canvas); // 解説に貼る画像とは別に、文字の読み取り用の高解像度版も持つ
       onCrop(img);
       setCropInfo(`切り抜きました(${img.width}×${img.height}px・約${Math.round(img.bytes / 1024)}KB)。解説の「切り抜きを貼り付け」で入れられます。`);
       setCropMode(false);

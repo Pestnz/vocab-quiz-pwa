@@ -59,6 +59,49 @@ export interface Question {
   updatedAt: string;
 }
 
+// ---------------- 本文(長文)と文(SPEC §5.4。Phase 5) ----------------
+
+/** 品詞分解の1語(Phase 5b で使う) */
+export interface StructureToken {
+  text: string;
+  pos?: string; // 品詞: 名詞/動詞/形容詞…
+  role?: 'S' | 'V' | 'O' | 'C' | 'M' | 'other'; // 文型上の役割
+  group?: { type: 'noun' | 'adj' | 'adv' | 'clause' | 'to-inf' | 'ing'; id: string }; // かっこ付けの単位
+  note?: string;
+}
+
+export interface SentenceStructure {
+  tokens: StructureToken[];
+  note?: string; // 文法ポイントの補足
+}
+
+export interface PassageSentence {
+  id: string;
+  order: number; // 本文内の並び順(小さい順。小数でもよい)
+  no: number; // 文番号(表示用。並べ替えのたびに振り直す)
+  en: string; // 英文
+  ja: string; // 全訳
+  speaker?: string; // 対話文の話者
+  structure?: SentenceStructure; // 品詞分解・文構造(任意。Phase 5b)
+  ocrConfidence?: 'high' | 'low'; // 読み取りの自信。低いものは確認を促す
+  reviewed: boolean; // 人が確認済みか(AIの下書き・読み取りのままなら false)
+  paraStart?: boolean; // この文から新しい段落が始まる(SPEC の paragraphBreaks の代わりに、文ごとに持つ)
+  updatedAt: string;
+}
+
+export interface GlossaryItem {
+  term: string;
+  meaning: string;
+}
+
+export interface Passage {
+  id: string;
+  title?: string;
+  sentences: PassageSentence[]; // 文単位で管理(後から品詞分解を足しても作り直しにならない)
+  glossary?: GlossaryItem[]; // (注)や重要語句
+  updatedAt: string;
+}
+
 export interface ExamSection {
   id: string;
   order: number; // 大問の並び順(小さい順)
@@ -66,8 +109,8 @@ export interface ExamSection {
   title?: string; // 例: '長文(スピーチ)'
   kind: SectionKind;
   updatedAt: string;
-  deletedItemIds: string[]; // 削除した設問のID(マージ時の復活防止)
-  passages: unknown[]; // 長文・資料(Phase 5 で使う。今は空)
+  deletedItemIds: string[]; // 削除した設問・本文・文のID(マージ時の復活防止)
+  passages: Passage[]; // 長文・資料(なければ空)
   questions: Question[];
   note?: string; // 大問全体の講師メモ(印刷に出さない)
 }

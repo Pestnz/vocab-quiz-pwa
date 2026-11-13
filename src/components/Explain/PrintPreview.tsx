@@ -7,6 +7,7 @@ import type { PaginateResult, PrintMode } from '../../services/explainPaginate';
 import { buildPrintHtml } from '../../services/explainPrintHtml';
 import type { PrintScope } from '../../services/explainPrintHtml';
 import { countMissingReasons } from '../../services/explainSections';
+import { countUnreviewed } from '../../services/explainPassages';
 import { DEFAULT_PRINT_LAYOUT, normalizeLayout } from '../../services/explainLayout';
 import './explain.css';
 
@@ -80,7 +81,9 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.content, doc.sections, layout, mode, scope]);
 
-  const missingReasons = scope === 'free' ? 0 : countMissingReasons(doc.sections);
+  const missingReasons = scope === 'free' || scope === 'passages' ? 0 : countMissingReasons(doc.sections);
+  // AIの下書き・読み取りのまま(未確認)の文。印刷の前に気づけるように警告する
+  const unreviewed = scope === 'free' || scope === 'answers' ? 0 : doc.sections.reduce((n, s) => n + countUnreviewed(s.passages), 0);
 
   const headerText = layout.headerText.trim() || doc.title;
   const pageCount = result?.pages.length ?? 0;
@@ -133,8 +136,9 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
               className="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-md px-2 py-1.5"
               aria-label="印刷する範囲"
             >
-              <option value="all">すべて(自由記述+解答解説)</option>
-              <option value="answers">解答解説(大問)のみ</option>
+              <option value="all">すべて(自由記述+本文解説+解答解説)</option>
+              <option value="passages">本文解説のみ</option>
+              <option value="answers">解答解説(設問)のみ</option>
               <option value="free">自由記述のみ</option>
             </select>
 
@@ -206,6 +210,12 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
 
           <div className="px-3 pb-2 text-[11px] text-slate-500">
             印刷ダイアログでは、用紙「A4」・倍率「100%」・余白「なし」・「背景のグラフィック」オンにすると、この表示どおりに出力されます。
+            {unreviewed > 0 && (
+              <span className="ml-2 inline-flex items-center gap-1 text-amber-400">
+                <AlertTriangle className="w-3 h-3" />
+                本文に、確認していない文(AIの下書きなど)が {unreviewed} 文あります。印刷の前に確認してください。
+              </span>
+            )}
             {missingReasons > 0 && (
               <span className="ml-2 inline-flex items-center gap-1 text-amber-400">
                 <AlertTriangle className="w-3 h-3" />

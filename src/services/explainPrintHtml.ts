@@ -1,8 +1,10 @@
-import type { ExamSection, LocalExplainDoc, Question } from '../types/explain';
+import type { ExamSection, LocalExplainDoc, Passage, Question } from '../types/explain';
 import { bySectionOrder, fullLabel, isRichEmpty, orderedWithDepth } from './explainSections';
+import { toParagraphs } from './explainPassages';
 import { docToHtml } from './explainPaginate';
 
-export type PrintScope = 'all' | 'answers' | 'free';
+/** all = 自由記述+本文解説+解答解説 / passages = 本文解説のみ / answers = 解答解説のみ / free = 自由記述のみ */
+export type PrintScope = 'all' | 'passages' | 'answers' | 'free';
 
 const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ESC[c]);
@@ -56,26 +58,71 @@ function questionHtml(q: Question, label: string, depth: 0 | 1): string {
   return `<div class="ex-q${depth === 1 ? ' ex-sub' : ''}">${parts.join('')}</div>`;
 }
 
-function sectionHtml(s: ExamSection): string {
-  const title = `大問${s.number || ''}${s.title ? ` ${s.title}` : ''}`;
-  const out: string[] = [`<h2>${esc(title)}</h2>`];
-  if (s.note?.trim()) out.push(`<div data-teacher-note="true"><p>${plain(s.note)}</p></div>`);
-  for (const { q, depth } of orderedWithDepth(s.questions)) out.push(questionHtml(q, fullLabel(q, s.questions), depth));
+const CIRCLED = (n: number): string => (n >= 1 && n <= 20 ? String.fromCharCode(0x2460 + n - 1) : `(${n})`);
+const SENTENCES_PER_TABLE = 8; // 1つの表(途中で切れないブロック)に入れる文の数。段落が長くても、ページに収まるように分ける
+
+/** 本文(英文と全訳)の印刷用HTML。段落ごとに、文番号・英文・全訳を並べた表にする */
+function passageHtml(p: Passage): string {
+  const out: string[] = [];
+  if (p.title?.trim()) out.push(`<h3>${esc(p.title)}</h3>`);
+  let no = 0;
+  for (const para of toParagraphs(p.sentences)) {
+    for (let i = 0; i < para.length; i += SENTENCES_PER_TABLE) {
+      const chunk = para.slice(i, i + SENTENCES_PER_TABLE);
+      const rows = chunk
+        .map((s) => {
+          no++;
+          const sp = s.speaker?.trim() ? `<b class="ex-speaker">${esc(s.speaker)}:</b> ` : '';
+          return `<tr><td class="ex-sno">${CIRCLED(no)}</td><td class="ex-en">${sp}${esc(s.en)}</td><td class="ex-ja">${esc(s.ja)}</td></tr>`;
+        })
+        .join('');
+      const last = i + SENTENCES_PER_TABLE >= para.length;
+      out.push(`<table class="ex-passage${last ? '' : ' ex-li-mid'}"><tbody>${rows}</tbody></table>`);
+    }
+  }
+  const gl = (p.glossary ?? []).filter((g) => g.term.trim() !== '');
+  if (gl.length > 0) {
+    out.push(`<p class="ex-glossary"><b>(注)</b> ${gl.map((g) => `${esc(g.term)} ${esc(g.meaning)}`).join('　')}</p>`);
+  }
   return out.join('');
 }
 
-/** 大問・設問(解答解説)の印刷用HTML。設問は1つのブロック(.ex-q)で、ページの途中で切れない */
-export function sectionsToHtml(sections: ExamSection[]): string {
+interface Include {
+  passages: boolean;
+  questions: boolean;
+}
+
+function sectionHtml(s: ExamSection, inc: Include): string {
+  const title = `大問${s.number || ''}${s.title ? ` ${s.title}` : ''}`;
+  const out: string[] = [`<h2>${esc(title)}</h2>`];
+  if (s.note?.trim()) out.push(`<div data-teacher-note="true"><p>${plain(s.note)}</p></div>`);
+  if (inc.passages) for (const p of [...s.passages]) out.push(passageHtml(p));
+  if (inc.questions) {
+    for (const { q, depth } of orderedWithDepth(s.questions)) out.push(questionHtml(q, fullLabel(q, s.questions), depth));
+  }
+  return out.join('');
+}
+
+/** 大問(本文解説・解答解説)の印刷用HTML。設問や表は1つのブロックで、ページの途中で切れない */
+export function sectionsToHtml(sections: ExamSection[], inc: Include = { passages: true, questions: true }): string {
   return [...sections]
     .sort(bySectionOrder)
-    .filter((s) => s.questions.length > 0 || (s.note ?? '').trim() !== '')
-    .map(sectionHtml)
+    .filter(
+      (s) =>
+        (inc.questions && s.questions.length > 0) ||
+        (inc.passages && s.passages.some((p) => p.sentences.length > 0)) ||
+        (s.note ?? '').trim() !== ''
+    )
+    .map((s) => sectionHtml(s, inc))
     .join('');
 }
 
-/** 印刷する範囲に応じて、自由記述と大問を組み合わせた、印刷用のHTMLを作る */
+/** 印刷する範囲に応じて、自由記述・本文解説・解答解説を組み合わせた、印刷用のHTMLを作る */
 export function buildPrintHtml(doc: LocalExplainDoc, scope: PrintScope): string {
-  const free = scope === 'answers' ? '' : docToHtml(doc.content);
-  const answers = scope === 'free' ? '' : sectionsToHtml(doc.sections);
-  return `${free}${answers}`;
+  const free = scope === 'all' || scope === 'free' ? docToHtml(doc.content) : '';
+  const sections =
+    scope === 'free'
+      ? ''
+      : sectionsToHtml(doc.sections, { passages: scope !== 'answers', questions: scope !== 'passages' });
+  return `${free}${sections}`;
 }

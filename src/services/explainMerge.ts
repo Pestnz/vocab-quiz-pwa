@@ -1,5 +1,6 @@
-import type { ExamSection, LocalExplainDoc, Question } from '../types/explain';
+import type { ExamSection, LocalExplainDoc, Passage, PassageSentence, Question } from '../types/explain';
 import { bySectionOrder } from './explainSections';
+import { bySentenceOrder } from './explainPassages';
 
 /**
  * 設問・大問単位のマージ(SPEC §6.7)。
@@ -72,6 +73,75 @@ function mergeQuestions(
   return out.sort(bySectionOrder);
 }
 
+// ---------------- 本文(長文)と文 ----------------
+
+function mergeSentences(
+  local: PassageSentence[],
+  remote: PassageSentence[],
+  deleted: Set<string>,
+  base: string | null,
+  loss: Losses
+): PassageSentence[] {
+  const lMap = new Map(local.map((s) => [s.id, s]));
+  const rMap = new Map(remote.map((s) => [s.id, s]));
+  const out: PassageSentence[] = [];
+  for (const id of new Set([...lMap.keys(), ...rMap.keys()])) {
+    const l = lMap.get(id);
+    const r = rMap.get(id);
+    if (deleted.has(id)) {
+      // 削除された。ただし、削除の後で編集していた側の内容は、競合コピーに残す
+      if (l && edited(l.updatedAt, base)) {
+        loss.lostLocal = true;
+        loss.conflicts++;
+      }
+      if (r && edited(r.updatedAt, base)) {
+        loss.lostRemote = true;
+        loss.conflicts++;
+      }
+      continue;
+    }
+    if (l && r) out.push(same(l, r) ? l : pickNewer(l, r, base, loss).value);
+    else out.push((l ?? r) as PassageSentence);
+  }
+  return out.sort(bySentenceOrder);
+}
+
+/** 本文の設定(タイトル・注)だけを取り出す。文の中身は含めない */
+const passageScalars = (p: Passage) => ({ title: p.title, glossary: p.glossary });
+
+function mergePassages(local: Passage[], remote: Passage[], deleted: Set<string>, base: string | null, loss: Losses): Passage[] {
+  const lMap = new Map(local.map((p) => [p.id, p]));
+  const rMap = new Map(remote.map((p) => [p.id, p]));
+  const out: Passage[] = [];
+  for (const id of new Set([...lMap.keys(), ...rMap.keys()])) {
+    const l = lMap.get(id);
+    const r = rMap.get(id);
+    if (deleted.has(id)) {
+      const hasEdits = (p: Passage) => edited(p.updatedAt, base) || p.sentences.some((s) => edited(s.updatedAt, base));
+      if (l && hasEdits(l)) {
+        loss.lostLocal = true;
+        loss.conflicts++;
+      }
+      if (r && hasEdits(r)) {
+        loss.lostRemote = true;
+        loss.conflicts++;
+      }
+      continue;
+    }
+    if (!(l && r)) {
+      out.push((l ?? r) as Passage);
+      continue;
+    }
+    const chosen = same(passageScalars(l), passageScalars(r)) ? l : pickNewer(l, r, base, loss).value;
+    out.push({
+      ...chosen,
+      updatedAt: ts(l.updatedAt) >= ts(r.updatedAt) ? l.updatedAt : r.updatedAt,
+      sentences: mergeSentences(l.sentences, r.sentences, deleted, base, loss),
+    });
+  }
+  return out;
+}
+
 /** 大問の設定(番号・タイトル・種類・順序・メモ)だけを取り出す。設問の中身は含めない */
 const sectionScalars = (s: ExamSection) => ({ order: s.order, number: s.number, title: s.title, kind: s.kind, note: s.note });
 
@@ -84,7 +154,7 @@ function mergeSection(l: ExamSection, r: ExamSection, base: string | null, loss:
     ...chosen,
     updatedAt: ts(l.updatedAt) >= ts(r.updatedAt) ? l.updatedAt : r.updatedAt,
     deletedItemIds: [...deletedItems],
-    passages: chosen.passages,
+    passages: mergePassages(l.passages, r.passages, deletedItems, base, loss),
     questions: mergeQuestions(l.questions, r.questions, deletedItems, base, loss),
   };
 }
@@ -110,7 +180,9 @@ export function mergeSections(
     const r = rMap.get(id);
     if (deleted.has(id)) {
       const hasEdits = (s: ExamSection) =>
-        edited(s.updatedAt, base) || s.questions.some((q) => edited(q.updatedAt, base));
+        edited(s.updatedAt, base) ||
+        s.questions.some((q) => edited(q.updatedAt, base)) ||
+        s.passages.some((p) => edited(p.updatedAt, base) || p.sentences.some((x) => edited(x.updatedAt, base)));
       if (l && hasEdits(l)) {
         loss.lostLocal = true;
         loss.conflicts++;

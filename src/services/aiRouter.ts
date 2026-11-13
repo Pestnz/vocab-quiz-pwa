@@ -26,7 +26,8 @@ export interface AiConfig {
 }
 
 const LITE_ROUTE = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash'];
-const FLASH_ROUTE = ['gemini-3.6-flash', 'gemini-3-flash-preview', 'gemini-3.8-flash', 'gemini-2.5-flash'];
+// gemini-2.5-flash は「新規利用者には提供終了」(404)になっていたため、models.list にある gemini-3.5-flash に替えた
+const FLASH_ROUTE = ['gemini-3.6-flash', 'gemini-3-flash-preview', 'gemini-3.8-flash', 'gemini-3.5-flash'];
 
 /** 初期値(2026-11-11 に利用者と確定した割り当てと、AI Studio の無料枠の実測値) */
 export const DEFAULT_AI_CONFIG: AiConfig = {
@@ -42,6 +43,7 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
     'gemini-3.6-flash': 20,
     'gemini-3-flash-preview': 20,
     'gemini-3.8-flash': 20,
+    'gemini-3.5-flash': 20, // 無料枠の実測値が未確認のため、少ない枠のモデルと同じ慎重な値
     'gemini-2.5-flash': 20,
     'gemini-2.5-flash-lite': 20,
     'gemini-3.1-flash-lite': 500,
@@ -195,7 +197,7 @@ export function planFor(purpose: AiPurpose, cfg: AiConfig = loadAiConfig(), usag
 
 // ---------------- 呼び出し ----------------
 
-export type AiErrorCode = 'no-key' | 'auth' | 'exhausted' | 'bad-request' | 'parse' | 'network' | 'empty';
+export type AiErrorCode = 'no-key' | 'auth' | 'exhausted' | 'bad-request' | 'parse' | 'network' | 'empty' | 'recitation';
 
 export class AiError extends Error {
   code: AiErrorCode;
@@ -220,6 +222,7 @@ export interface AiCallOptions {
   apiKey?: string; // 省略時は設定画面のAPIキー
   signal?: AbortSignal;
   fetchImpl?: typeof fetch; // テスト用
+  retryDelayMs?: number; // 503のあとの待ち時間(テストで短くする用)
   config?: AiConfig; // テスト用
 }
 
@@ -260,6 +263,7 @@ export async function callGemini(o: AiCallOptions): Promise<AiCallResult> {
   const attempts: Array<{ model: string; status: string }> = [];
   let sawQuota = false;
   let sawNetwork = false;
+  let sawRecitation = false; // 「既存の文章の再現」とみなされて、出力が止められた
 
   for (const model of cfg.routes[o.purpose]) {
     if (remainingOf(model, cfg, usage) <= 0) {
@@ -269,8 +273,9 @@ export async function callGemini(o: AiCallOptions): Promise<AiCallResult> {
     }
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
     let withSchema = Boolean(o.schema);
+    let retried503 = false;
 
-    for (let pass = 0; pass < 2; pass++) {
+    for (let pass = 0; pass < 3; pass++) {
       let res: Response;
       try {
         res = await doFetch(url, {
@@ -298,6 +303,7 @@ export async function callGemini(o: AiCallOptions): Promise<AiCallResult> {
           return { text, model, attempts };
         }
         attempts.push({ model, status: `空の応答(${cand?.finishReason ?? '不明'})` });
+        if (cand?.finishReason === 'RECITATION') sawRecitation = true;
         break; // 次のモデルへ
       }
 
@@ -310,6 +316,12 @@ export async function callGemini(o: AiCallOptions): Promise<AiCallResult> {
       }
       if (res.status === 401 || res.status === 403) {
         throw new AiError('auth', `APIキーが使えません(${res.status})。キーと権限を確認してください。`, attempts);
+      }
+      if (res.status === 503 && !retried503) {
+        // 混雑は一時的なことが多い。次のモデルへ移る前に、少し待って同じモデルをもう一度試す(503は回数に数えない)
+        retried503 = true;
+        await new Promise((r) => setTimeout(r, o.retryDelayMs ?? 2500));
+        continue;
       }
       if (FALLBACK_STATUSES.has(res.status)) {
         attempts.push({ model, status: res.status === 429 ? '枠切れ(429)' : res.status === 503 ? '混雑(503)' : `エラー(${res.status})` });
@@ -333,6 +345,13 @@ export async function callGemini(o: AiCallOptions): Promise<AiCallResult> {
   }
   if (sawNetwork) {
     throw new AiError('network', `Geminiに接続できませんでした。通信を確認してください。(${summary})`, attempts);
+  }
+  if (sawRecitation) {
+    throw new AiError(
+      'recitation',
+      `AIが、長い文章の書き出しを「既存の文章の再現」とみなして止めました。読む範囲を短くして、やり直してください。(${summary})`,
+      attempts
+    );
   }
   throw new AiError(
     'exhausted',

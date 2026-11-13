@@ -144,6 +144,16 @@
 .explain-page-body .ex-model p { margin: 0.2em 0 0; }
 .explain-page-body .ex-scoring { font-size: 0.92em; }
 
+/* ---- 本文解説(英文と全訳)。段落ごとの表。文の途中ではページを切らない ---- */
+.explain-page-body .ex-passage { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.explain-page-body .ex-passage td { padding: 0.25em 0.4em; vertical-align: top; border-bottom: 1px dotted #bbb; }
+.explain-page-body .ex-passage tr { break-inside: avoid; }
+.explain-page-body .ex-sno { width: 2.2em; text-align: center; font-family: sans-serif; }
+.explain-page-body .ex-en { width: 50%; font-family: 'Times New Roman', 'Yu Mincho', serif; }
+.explain-page-body .ex-ja { width: calc(50% - 2.2em); }
+.explain-page-body .ex-speaker { font-family: sans-serif; font-size: 0.9em; }
+.explain-page-body .ex-glossary { font-size: 0.9em; color: #333; }
+
 /* ---- 講師メモ(生徒配布用には印刷されない) ---- */
 .explain-paper [data-teacher-note],
 .explain-page-body [data-teacher-note] {
