@@ -20,6 +20,8 @@ import {
   renumberSections,
 } from '../../services/explainSections';
 import { QuestionCard } from './QuestionCard';
+import { AnswerKeyImport } from './AnswerKeyImport';
+import { AiStatusPanel } from './AiStatusPanel';
 
 interface SectionsEditorProps {
   sections: ExamSection[];
@@ -34,6 +36,8 @@ export const SectionsEditor: React.FC<SectionsEditorProps> = ({ sections, delete
   const sorted = useMemo(() => [...sections].sort(bySectionOrder), [sections]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [newQuestionId, setNewQuestionId] = useState<string | null>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [showAi, setShowAi] = useState(false);
 
   const selected = sorted.find((s) => s.id === selectedId) ?? sorted[0] ?? null;
   const totalMissing = countMissingReasons(sections);
@@ -167,6 +171,19 @@ export const SectionsEditor: React.FC<SectionsEditorProps> = ({ sections, delete
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-slate-900">
+      {showImport && (
+        <AnswerKeyImport
+          sections={sections}
+          defaultSectionId={selected?.id ?? null}
+          onApply={(next) => {
+            commit(next);
+            setShowImport(false);
+          }}
+          onClose={() => setShowImport(false)}
+          onOpenAiSettings={() => setShowAi(true)}
+        />
+      )}
+      {showAi && <AiStatusPanel onClose={() => setShowAi(false)} />}
       {/* 大問のタブ */}
       <div className="flex items-center gap-1 px-2 py-1.5 border-b border-slate-800 overflow-x-auto">
         {sorted.map((s) => {
@@ -188,7 +205,14 @@ export const SectionsEditor: React.FC<SectionsEditorProps> = ({ sections, delete
         <button onClick={addSection} className="shrink-0 p-1.5 rounded-md text-slate-300 hover:bg-slate-700 cursor-pointer" title="大問を追加">
           <Plus className="w-4 h-4" />
         </button>
-        <span className="ml-auto shrink-0 pl-2 text-[11px]">
+        <button
+          onClick={() => setShowImport(true)}
+          className="shrink-0 ml-auto px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] text-slate-200 cursor-pointer"
+          title="正答表(貼り付け・PDF・画像)から、正解と配点を取り込む"
+        >
+          正答表を取り込む
+        </button>
+        <span className="shrink-0 pl-2 text-[11px]">
           {totalMissing > 0 ? (
             <span className="flex items-center gap-1 text-amber-400">
               <AlertTriangle className="w-3.5 h-3.5" />

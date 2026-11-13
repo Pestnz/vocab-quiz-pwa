@@ -32,6 +32,8 @@ import { PrintPreview } from './PrintPreview';
 import { ExplainLibrary } from './ExplainLibrary';
 import { MetaPanel } from './MetaPanel';
 import { SectionsEditor } from './SectionsEditor';
+import { AiStatusPanel } from './AiStatusPanel';
+import { planFor } from '../../services/aiRouter';
 import { countMissingReasons } from '../../services/explainSections';
 import { usePdfPopout } from './usePdfPopout';
 import type { PopoutPatch } from '../../services/explainPopout';
@@ -78,6 +80,8 @@ export const ExplainView: React.FC = () => {
   const [sync, setSync] = useState<SyncUi>({ status: 'idle' });
   const [syncConfigured, setSyncConfigured] = useState(() => isSyncConfigured());
   const closePreview = useCallback(() => setPreviewOpen(false), []);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiTick, setAiTick] = useState(0); // AI設定を閉じたときに、残り回数の表示を更新する
 
   const docRef = useRef<LocalExplainDoc | null>(null);
   const docsRef = useRef<LocalExplainDoc[]>([]);
@@ -602,6 +606,15 @@ export const ExplainView: React.FC = () => {
     <div className="flex flex-col w-full" style={{ height: 'calc(100dvh - 5.5rem)' }}>
       <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={handleFileChosen} />
 
+      {aiPanelOpen && (
+        <AiStatusPanel
+          onClose={() => {
+            setAiPanelOpen(false);
+            setAiTick((t) => t + 1);
+          }}
+        />
+      )}
+
       {previewOpen && current && (
         <PrintPreview
           doc={current}
@@ -659,6 +672,15 @@ export const ExplainView: React.FC = () => {
         )}
 
         <div className="ml-auto flex items-center gap-3 text-[11px]">
+          <button
+            key={aiTick}
+            onClick={() => setAiPanelOpen(true)}
+            className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 cursor-pointer"
+            title="今日のAI残り回数と、用途ごとのモデル設定(AIは任意。使わなくても解説は作れます)"
+          >
+            AI残り 読取{planFor('ocr').models.find((m) => m.model === planFor('ocr').next)?.remaining ?? 0}・解説
+            {planFor('translate').models.find((m) => m.model === planFor('translate').next)?.remaining ?? 0}
+          </button>
           {view === 'work' && current && saveBadge}
           {syncBadge}
           {syncButton}
