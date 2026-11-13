@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 機密・著作物・実データ(公開リポジトリに絶対コミットしない)
+explanations/
+*.pdf
+.env*
+test-data/
