@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { BrainCircuit, Clock, PenTool, Calendar } from 'lucide-react';
 import { Header } from './components/Layout/Header';
 import { BottomNav } from './components/Layout/BottomNav';
@@ -41,6 +41,9 @@ import {
 import { githubSyncService } from './services/githubSync';
 import { analyzeVocabularyBatch } from './services/gemini';
 import { isDuplicateVocab } from './services/vocabUtils';
+
+// 解説ワークベンチ(PDF.js / TipTap を含むため、開いたときだけ読み込む)
+const ExplainView = lazy(() => import('./components/Explain/ExplainView'));
 
 const PAGE_SIZE = 20;
 
@@ -721,7 +724,11 @@ export const App: React.FC = () => {
       />
 
       {/* メインビュー */}
-      <main className="flex-1 w-full max-w-7xl mx-auto flex flex-col min-h-0 pb-16 md:pb-6">
+      <main
+        className={`flex-1 w-full mx-auto flex flex-col min-h-0 pb-16 md:pb-6 ${
+          currentView === 'explain' ? 'max-w-none' : 'max-w-7xl'
+        }`}
+      >
         {currentView === 'list' ? (
           <>
             {/* モバイル / 画面分割時 (< md: 768px): 1カラム */}
@@ -878,6 +885,10 @@ export const App: React.FC = () => {
               showToast={showToast}
             />
           </div>
+        ) : currentView === 'explain' ? (
+          <Suspense fallback={<div className="p-6 text-sm text-slate-400">解説ワークベンチを読み込み中…</div>}>
+            <ExplainView />
+          </Suspense>
         ) : (
           <FlashcardQuiz
             vocabList={vocabList}

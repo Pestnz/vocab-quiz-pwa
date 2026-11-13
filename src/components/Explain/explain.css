@@ -1,0 +1,52 @@
+/* 解説エディターの「用紙」(A4幅 210mm ≒ 794px @96dpi)。画面は白地・黒文字で、印刷の見た目に近づける */
+.explain-paper {
+  width: 794px;
+  max-width: 100%;
+  min-height: 1123px;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 76px 76px; /* 約20mm */
+  background-color: #ffffff;
+  color: #111111;
+  font-family: 'Yu Mincho', 'Hiragino Mincho ProN', 'Noto Serif JP', 'Times New Roman', serif;
+  font-size: 14px;
+  line-height: 1.8;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  /* A4 1ページ(1123px)ごとの改ページ目安線 */
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 1121px,
+    rgba(239, 68, 68, 0.55) 1121px,
+    rgba(239, 68, 68, 0.55) 1123px
+  );
+}
+
+.explain-paper .ProseMirror {
+  outline: none;
+  min-height: 960px;
+}
+
+.explain-paper .ProseMirror > * + * {
+  margin-top: 0.6em;
+}
+
+.explain-paper h1 { font-size: 1.6em; font-weight: 700; line-height: 1.4; }
+.explain-paper h2 { font-size: 1.3em; font-weight: 700; line-height: 1.4; border-bottom: 1px solid #999; padding-bottom: 2px; }
+.explain-paper h3 { font-size: 1.1em; font-weight: 700; line-height: 1.4; }
+.explain-paper ul { list-style: disc; padding-left: 1.6em; }
+.explain-paper ol { list-style: decimal; padding-left: 1.6em; }
+.explain-paper blockquote { border: 1px solid #555; padding: 0.4em 0.8em; background: #f5f5f5; }
+.explain-paper hr { border: none; border-top: 1px solid #999; margin: 1em 0; }
+.explain-paper code { background: #eee; padding: 0 3px; border-radius: 3px; font-size: 0.92em; }
+.explain-paper strong { font-weight: 700; }
+.explain-paper em { font-style: italic; }
+.explain-paper u { text-decoration: underline; }
+
+.explain-paper .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #aaa;
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

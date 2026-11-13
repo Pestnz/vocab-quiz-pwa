@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, BrainCircuit, PenTool, Calendar, Settings } from 'lucide-react';
+import { BookOpen, BrainCircuit, PenTool, Calendar, Settings, FileText } from 'lucide-react';
 import type { SyncStatusState, ViewMode } from '../../types/vocab';
 import { SyncStatusBadge } from './SyncStatusBadge';
 
@@ -89,6 +89,17 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <BrainCircuit className="w-3.5 h-3.5" />
               <span>クイズ</span>
+            </button>
+            <button
+              onClick={() => onViewChange('explain')}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                currentView === 'explain'
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>解説</span>
             </button>
           </div>
 

@@ -56,7 +56,7 @@ export type FilterType = 'all' | VocabType;
 export type SortOption = 'created_desc' | 'created_asc' | 'term_asc' | 'term_desc';
 
 // 画面表示モード
-export type ViewMode = 'list' | 'quiz' | 'sentence' | 'diary';
+export type ViewMode = 'list' | 'quiz' | 'sentence' | 'diary' | 'explain';
 
 // 出題ソースモード（マイ単語帳 / AIランダム）
 export type SentenceSourceMode = 'my_vocab' | 'ai_random';
