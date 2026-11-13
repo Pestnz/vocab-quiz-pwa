@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { JSONContent } from '@tiptap/react';
 import {
+  ExternalLink,
   FileUp,
   CheckCircle2,
   Loader2,
@@ -29,6 +30,8 @@ import { DocEditor } from './DocEditor';
 import { PrintPreview } from './PrintPreview';
 import { ExplainLibrary } from './ExplainLibrary';
 import { MetaPanel } from './MetaPanel';
+import { usePdfPopout } from './usePdfPopout';
+import type { PopoutPatch } from '../../services/explainPopout';
 
 type SaveState = 'saved' | 'unsaved' | 'saving' | 'error';
 type View = 'library' | 'work';
@@ -155,6 +158,23 @@ export const ExplainView: React.FC = () => {
     },
     [flush, loadPdfFor]
   );
+
+  // ---- PDFの別ウィンドウ(ここだけが保存を担当。別ウィンドウからの操作を受けて反映する) ----
+  const handlePopoutPatch = useCallback(
+    (docId: string, patch: PopoutPatch) => {
+      if (docRef.current?.id !== docId) return;
+      patchDoc(patch);
+      if (patch.pdfKey && docRef.current) void loadPdfFor(docRef.current);
+    },
+    [patchDoc, loadPdfFor]
+  );
+  const popout = usePdfPopout(current, handlePopoutPatch);
+
+  const handleOpenPopout = () => {
+    if (!popout.openWindow()) {
+      window.alert('別ウィンドウを開けませんでした。ブラウザのポップアップのブロックを許可してから、もう一度押してください。');
+    }
+  };
 
   // ---- GitHub 同期 ----
   const refreshAfterSync = useCallback(
@@ -571,6 +591,16 @@ export const ExplainView: React.FC = () => {
               <FileUp className="w-3.5 h-3.5" />
               PDFを開く
             </button>
+            {!popout.open && (
+              <button
+                className={topBtn}
+                onClick={handleOpenPopout}
+                title="問題PDFを別ウィンドウに出して、エディターを画面いっぱいに使えます(サブモニター向け)"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                PDFを別ウィンドウで開く
+              </button>
+            )}
             <button className={`${topBtn} !bg-emerald-700 hover:!bg-emerald-600 !border-emerald-600`} onClick={() => setPreviewOpen(true)}>
               <Printer className="w-3.5 h-3.5" />
               印刷プレビュー
@@ -601,6 +631,20 @@ export const ExplainView: React.FC = () => {
           onDuplicate={(d) => void handleDuplicate(d)}
           onDelete={(d) => void handleDelete(d)}
         />
+      ) : popout.open ? (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 border-b border-slate-800 bg-sky-950/60 text-xs text-sky-100">
+            <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+            <span>PDFは別ウィンドウで表示中です。ページ送り・拡大は、どちらのウィンドウからでも操作できます。</span>
+            <button className={`${topBtn} ml-auto`} onClick={popout.focusWindow}>
+              別ウィンドウを前面へ
+            </button>
+            <button className={topBtn} onClick={popout.close}>
+              PDFをこの画面に戻す
+            </button>
+          </div>
+          <div className="flex-1 min-h-0">{editorPane}</div>
+        </div>
       ) : narrow ? (
         <div className="flex-1 min-h-0 flex flex-col">
           <div className="flex border-b border-slate-800 bg-slate-900 text-xs">
