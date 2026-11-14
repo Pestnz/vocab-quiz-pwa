@@ -5,7 +5,7 @@ import type { VocabAnalysisResult } from '../types/vocab';
 const PRIMARY_MODEL = 'gemini-3.6-flash';
 const FALLBACK_MODELS = [
   'gemini-3.6-flash',
-  'gemini-2.5-flash',
+  'gemini-3.5-flash',
 ];
 const BATCH_CHUNK_SIZE = 15; // 1回あたりの最大安全チャンク数
 
