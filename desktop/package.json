@@ -1,0 +1,41 @@
+{
+  "name": "vocab-explain-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "入試解説ワークベンチ デスクトップ版(PWA本体の dist を読み込む殻)",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "build:web": "npm --prefix .. run build",
+    "dist": "npm run build:web && electron-builder --win"
+  },
+  "build": {
+    "appId": "local.vocab.explain",
+    "productName": "入試解説ワークベンチ",
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "dist"
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0"
+  }
+}

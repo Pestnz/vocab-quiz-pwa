@@ -11,6 +11,9 @@ interface ExplainLibraryProps {
   onOpen: (doc: LocalExplainDoc) => void;
   onNew: () => void;
   onNewFromPdf: () => void;
+  /** 最近開いたPDF(デスクトップ版のみ。空なら表示しない) */
+  recentPdfs?: { name: string; path: string; openedAt: string }[];
+  onOpenRecent?: (path: string) => void;
   onDuplicate: (doc: LocalExplainDoc) => void;
   onDelete: (doc: LocalExplainDoc) => void;
 }
@@ -31,6 +34,8 @@ export const ExplainLibrary: React.FC<ExplainLibraryProps> = ({
   onOpen,
   onNew,
   onNewFromPdf,
+  recentPdfs,
+  onOpenRecent,
   onDuplicate,
   onDelete,
 }) => {
@@ -130,6 +135,22 @@ export const ExplainLibrary: React.FC<ExplainLibraryProps> = ({
             PDFから始める
           </button>
         </div>
+
+        {recentPdfs && recentPdfs.length > 0 && onOpenRecent && (
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="text-slate-400 mr-1">最近開いたPDF:</span>
+            {recentPdfs.slice(0, 8).map((r) => (
+              <button
+                key={r.path}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 cursor-pointer max-w-[240px] truncate"
+                title={`${r.path}\n(押すと、このPDFから新しい解説を始めます)`}
+                onClick={() => onOpenRecent(r.path)}
+              >
+                {r.name}
+              </button>
+            ))}
+          </div>
+        )}
 
         {docs.length === 0 ? (
           <div className="py-16 text-center text-sm text-slate-400 space-y-2">

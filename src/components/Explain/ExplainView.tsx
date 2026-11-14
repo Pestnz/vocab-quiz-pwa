@@ -38,6 +38,8 @@ import { FILE_MAX_BYTES, FILE_WARN_BYTES, setCrop, setDocBytes, useDocBytes } fr
 import { docToFile } from '../../services/explanationSync';
 import { countMissingReasons } from '../../services/explainSections';
 import { usePdfPopout } from './usePdfPopout';
+import { desktopPdfToFile, getDesktop } from '../../services/desktopBridge';
+import type { DesktopRecentPdf } from '../../services/desktopBridge';
 import type { PopoutPatch } from '../../services/explainPopout';
 
 type SaveState = 'saved' | 'unsaved' | 'saving' | 'error';
@@ -85,6 +87,7 @@ export const ExplainView: React.FC = () => {
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiTick, setAiTick] = useState(0); // AI設定を閉じたときに、残り回数の表示を更新する
 
+  const [recentPdfs, setRecentPdfs] = useState<DesktopRecentPdf[]>([]);
   const fileBytes = useDocBytes();
   const docRef = useRef<LocalExplainDoc | null>(null);
   const docsRef = useRef<LocalExplainDoc[]>([]);
@@ -414,10 +417,45 @@ export const ExplainView: React.FC = () => {
     void runSync();
   };
 
-  const handlePickFile = () => fileInputRef.current?.click();
-  const handleNewFromPdf = () => {
-    newFromPdfRef.current = true;
-    fileInputRef.current?.click();
+  // デスクトップ版では、OSのファイル選択(前回のフォルダから開く・履歴に残る)を使う。ブラウザでは従来どおり。
+  const pickPdf = async (asNew: boolean) => {
+    const desktop = getDesktop();
+    if (!desktop) {
+      newFromPdfRef.current = asNew;
+      fileInputRef.current?.click();
+      return;
+    }
+    try {
+      const picked = await desktop.pickPdf();
+      if (picked) await ingestFile(desktopPdfToFile(picked), asNew);
+    } catch (err) {
+      console.error('Failed to open PDF', err);
+      window.alert('PDFを開けませんでした。');
+    }
+  };
+  // 最近開いたPDF(デスクトップ版のみ)。ライブラリを開くたびに読み直す
+  useEffect(() => {
+    const desktop = getDesktop();
+    if (!desktop || view !== 'library') return;
+    let alive = true;
+    desktop.recentPdfs().then((list) => alive && setRecentPdfs(list)).catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [view]);
+
+  const handlePickFile = () => void pickPdf(false);
+  const handleNewFromPdf = () => void pickPdf(true);
+
+  const handleOpenRecent = async (p: string) => {
+    const desktop = getDesktop();
+    if (!desktop) return;
+    try {
+      await ingestFile(desktopPdfToFile(await desktop.readRecentPdf(p)), true);
+    } catch (err) {
+      console.error('Failed to open recent PDF', err);
+      window.alert('このPDFは開けませんでした(移動・削除された可能性があります)。');
+    }
   };
 
   const handleFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -426,6 +464,10 @@ export const ExplainView: React.FC = () => {
     const asNew = newFromPdfRef.current;
     newFromPdfRef.current = false;
     if (!file) return;
+    await ingestFile(file, asNew);
+  };
+
+  const ingestFile = async (file: File, asNew: boolean) => {
     if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
       window.alert('PDFファイルを選んでください。');
       return;
@@ -727,6 +769,8 @@ export const ExplainView: React.FC = () => {
           onOpen={(d) => void handleOpenFromLibrary(d)}
           onNew={() => void handleNewDoc()}
           onNewFromPdf={handleNewFromPdf}
+          recentPdfs={recentPdfs}
+          onOpenRecent={(p) => void handleOpenRecent(p)}
           onDuplicate={(d) => void handleDuplicate(d)}
           onDelete={(d) => void handleDelete(d)}
         />

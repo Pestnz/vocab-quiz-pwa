@@ -10,6 +10,7 @@ import { countMissingReasons } from '../../services/explainSections';
 import { countUnreviewed } from '../../services/explainPassages';
 import { countStructureUnreviewed } from '../../services/explainStructure';
 import { DEFAULT_PRINT_LAYOUT, normalizeLayout } from '../../services/explainLayout';
+import { getDesktop } from '../../services/desktopBridge';
 import './explain.css';
 
 interface PrintPreviewProps {
@@ -43,6 +44,18 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
   const [zoom, setZoom] = useState<number>(0.85);
   const [showSettings, setShowSettings] = useState(false);
   const [result, setResult] = useState<PaginateResult | null>(null);
+  const desktop = getDesktop(); // デスクトップ版だけ「PDFファイルとして保存」を出す
+
+  const saveAsPdf = async () => {
+    if (!desktop) return;
+    try {
+      const r = await desktop.savePrintAsPdf(doc.title || '解説');
+      if (r.saved) window.alert(`保存しました。\n${r.path ?? ''}`);
+    } catch (err) {
+      console.error('Failed to save PDF', err);
+      window.alert('PDFを保存できませんでした。');
+    }
+  };
 
   // 印刷用の設定(@page)・本文以外を隠すクラス・PDF保存時の既定ファイル名(タイトル)。閉じたら元に戻す
   useEffect(() => {
@@ -179,6 +192,16 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ doc, layout, onLayou
                 <Printer className="w-3.5 h-3.5" />
                 印刷 / PDFに保存
               </button>
+              {desktop && (
+                <button
+                  onClick={() => void saveAsPdf()}
+                  disabled={!result}
+                  className={`${btn} bg-sky-700 border-sky-600 text-white hover:bg-sky-600`}
+                  title="このプレビューを、A4のPDFファイルとして直接保存します"
+                >
+                  PDFファイルとして保存
+                </button>
+              )}
               <button onClick={onClose} className={`${btn} bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700`}>
                 <X className="w-3.5 h-3.5" />
                 閉じる
