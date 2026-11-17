@@ -83,6 +83,7 @@ ${recent || '(none)'}`;
     parts: [{ text: prompt }],
     system,
     temperature: 1.0,
+    timeoutMs: 30_000,
     apiKey: p.apiKey,
     signal: p.signal,
   };
@@ -165,6 +166,7 @@ ${answer}
     parts: [{ text: prompt }],
     system,
     temperature: 0.3,
+    timeoutMs: 45_000,
     apiKey: p.apiKey,
     signal: p.signal,
   });

@@ -296,6 +296,14 @@ export const TeachingPractice: React.FC = () => {
             {current ? '別の質問を出す' : '質問を出す'}
           </button>
           <span className="text-[11px] text-slate-500">出題に使うAI: {plans.q.next ?? '—'}</span>
+          {busy !== 'idle' && (
+            <button
+              onClick={() => abortRef.current?.abort()}
+              className="px-3 py-2 rounded-md text-xs bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 cursor-pointer"
+            >
+              中止
+            </button>
+          )}
         </div>
         {planNote('出題', plans.q)}
       </section>

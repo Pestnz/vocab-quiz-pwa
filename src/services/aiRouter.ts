@@ -226,6 +226,7 @@ export interface AiCallOptions {
   maxOutputTokens?: number;
   apiKey?: string; // 省略時は設定画面のAPIキー
   signal?: AbortSignal;
+  timeoutMs?: number; // 1回の問い合わせの上限(超えたら次のモデルへ)。省略時は待ち続ける
   fetchImpl?: typeof fetch; // テスト用
   retryDelayMs?: number; // 503のあとの待ち時間(テストで短くする用)
   config?: AiConfig; // テスト用
@@ -268,6 +269,7 @@ export async function callGemini(o: AiCallOptions): Promise<AiCallResult> {
   const attempts: Array<{ model: string; status: string }> = [];
   let sawQuota = false;
   let sawNetwork = false;
+  let sawTimeout = false;
   let sawRecitation = false; // 「既存の文章の再現」とみなされて、出力が止められた
 
   for (const model of cfg.routes[o.purpose]) {
@@ -282,18 +284,31 @@ export async function callGemini(o: AiCallOptions): Promise<AiCallResult> {
 
     for (let pass = 0; pass < 3; pass++) {
       let res: Response;
+      // timeoutMs を指定された呼び出しは、1回の問い合わせがその時間を超えたら打ち切って次のモデルへ進む
+      const timeoutCtrl = o.timeoutMs ? new AbortController() : null;
+      const timer = timeoutCtrl ? setTimeout(() => timeoutCtrl.abort(), o.timeoutMs) : null;
+      const onAbort = () => timeoutCtrl?.abort();
+      o.signal?.addEventListener('abort', onAbort);
       try {
         res = await doFetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
           body: buildBody(o, withSchema),
-          signal: o.signal,
+          signal: timeoutCtrl ? timeoutCtrl.signal : o.signal,
         });
       } catch (e) {
-        if ((e as Error).name === 'AbortError') throw e;
+        if ((e as Error).name === 'AbortError') {
+          if (o.signal?.aborted || !timeoutCtrl) throw e; // 利用者が中止した
+          attempts.push({ model, status: `時間切れ(${Math.round((o.timeoutMs ?? 0) / 1000)}秒)` });
+          sawTimeout = true;
+          break; // 次のモデルへ
+        }
         attempts.push({ model, status: '通信エラー' });
         sawNetwork = true;
         break; // 次のモデルへ
+      } finally {
+        if (timer) clearTimeout(timer);
+        o.signal?.removeEventListener('abort', onAbort);
       }
 
       if (res.ok) {
@@ -345,6 +360,13 @@ export async function callGemini(o: AiCallOptions): Promise<AiCallResult> {
     throw new AiError(
       'exhausted',
       `いま使えるAIの枠がありません。再開は ${nextResetText()} です。手入力に切り替えて進められます。(${summary})`,
+      attempts
+    );
+  }
+  if (sawTimeout) {
+    throw new AiError(
+      'network',
+      `AIの返事が遅く、時間内に終わりませんでした。少し待ってから、やり直してください。(${summary})`,
       attempts
     );
   }
