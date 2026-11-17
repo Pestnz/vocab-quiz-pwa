@@ -248,15 +248,40 @@ function sanitizeResult(
   };
 }
 
+// 疎通テスト用: 1日の上限が多い軽量モデルだけを使う(単語解析の枠を消費しない)
+const TEST_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+
 export async function testGeminiApiKey(apiKey: string): Promise<{ success: boolean; message: string }> {
-  try {
-    const result = await analyzeVocabulary('apple', apiKey, 'en');
-    if (result.term) {
-      return { success: true, message: `Gemini API (推奨モデル: ${PRIMARY_MODEL}) との通信に成功しました。` };
+  const key = apiKey.trim();
+  if (!key) return { success: false, message: 'APIキーが入力されていません。' };
+
+  let lastMessage = 'APIキーの検証に失敗しました。';
+  for (const model of TEST_MODELS) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Reply with the single word: OK' }] }],
+          generationConfig: { maxOutputTokens: 16 },
+        }),
+      });
+      if (res.ok) {
+        return { success: true, message: `Gemini API との通信に成功しました(確認に使ったモデル: ${model})。` };
+      }
+      if (res.status === 401 || res.status === 403) {
+        return { success: false, message: 'APIキーが使えません。キーを確認してください。' };
+      }
+      if (res.status === 429) {
+        lastMessage = `${model} は、今日の無料枠を使い切っています。`;
+      } else if (res.status === 503) {
+        lastMessage = `${model} が混み合っています。少し待ってから、もう一度試してください。`;
+      } else {
+        lastMessage = `${model} がエラーを返しました(${res.status})。`;
+      }
+    } catch {
+      lastMessage = 'Geminiに接続できませんでした。通信を確認してください。';
     }
-    return { success: false, message: '解析結果が不正です。' };
-  } catch (e: unknown) {
-    const err = e as Error;
-    return { success: false, message: err.message || 'APIキーの検証に失敗しました。' };
   }
+  return { success: false, message: lastMessage };
 }

@@ -41,8 +41,9 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
     vocabBatch: LITE_ROUTE,
     ocr: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'],
     teachQuestion: LITE_ROUTE,
-    // 判定は内容の正しさが大事なので Flash を先に。混雑(503)が続くときでも止まらないよう、最後に Lite を置く
-    teachEvaluate: [...FLASH_ROUTE, 'gemini-3.5-flash-lite'],
+    // 1日の上限が多い Lite を先に使う(2026-11-17 の確認で、誤りの指摘・難語の指摘・良い答えの評価を十分にこなした)。
+    // Lite が混雑・枠切れのときだけ Flash に回す
+    teachEvaluate: ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', ...FLASH_ROUTE],
   },
   limits: {
     'gemini-3.6-flash': 20,
