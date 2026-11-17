@@ -1,11 +1,5 @@
-import { GoogleGenAI } from '@google/genai';
+import { callGemini } from './aiRouter';
 import type { Language, SentenceCheckResult } from '../types/vocab';
-
-const PRIMARY_MODEL = 'gemini-3.6-flash';
-const FALLBACK_MODELS = [
-  'gemini-3.6-flash',
-  'gemini-3.5-flash',
-];
 
 export interface CheckSentenceParams {
   targetWords: { term: string; meaning: string }[];
@@ -65,97 +59,26 @@ Output must be ONLY a valid JSON object matching this schema:
 ${userSentence.trim()}
 """`;
 
+  // 共通のAI呼び出し基盤(aiRouter)で、用途「一文作成の採点」のモデル順に試す。
+  // 上限の多い軽量モデルが先 → 枠切れ(429)・混雑(503)・エラーのときは次のモデルへ(設定画面のAI設定で変更可)
+  const originalTerms = targetWords.map(w => w.term);
   let lastError: Error | null = null;
-
-  // 1. GoogleGenAI SDK で試行
-  try {
-    const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
-    const response = await ai.models.generateContent({
-      model: PRIMARY_MODEL,
-      contents: prompt,
-      config: {
-        systemInstruction,
-        responseMimeType: 'application/json',
-      },
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await callGemini({
+      purpose: 'score',
+      parts: [{ text: prompt }],
+      system: systemInstruction,
+      json: true,
+      apiKey,
+      timeoutMs: 45_000,
     });
-
-    const text = response.text?.trim();
-    if (text) {
-      return parseAndSanitizeResult(text, targetWords.map(w => w.term));
-    }
-  } catch (err: unknown) {
-    console.warn(`Sentence check SDK call failed with ${PRIMARY_MODEL}, trying fallback REST...`, err);
-    lastError = err as Error;
-  }
-
-  // 2. REST API フォールバック
-  for (const model of FALLBACK_MODELS) {
     try {
-      return await checkSentenceRest(prompt, apiKey, systemInstruction, model, targetWords.map(w => w.term));
+      return parseAndSanitizeResult(res.text, originalTerms);
     } catch (err: unknown) {
-      console.warn(`Model ${model} failed for sentence check, trying next...`, err);
-      if (!lastError) {
-        lastError = err as Error;
-      }
+      lastError = err as Error; // 応答の形式が崩れていたら、1回だけやり直す
     }
   }
-
   throw lastError || new Error('Gemini APIによる添削判定に失敗しました。');
-}
-
-async function checkSentenceRest(
-  prompt: string,
-  apiKey: string,
-  systemInstruction: string,
-  modelName: string,
-  originalTerms: string[]
-): Promise<SentenceCheckResult> {
-  const versions = ['v1beta', 'v1'];
-  let lastErr: Error | null = null;
-
-  for (const ver of versions) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/${ver}/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
-
-      const payload = {
-        contents: [
-          {
-            parts: [{ text: prompt }],
-          },
-        ],
-        systemInstruction: {
-          parts: [{ text: systemInstruction }],
-        },
-        generationConfig: {
-          responseMimeType: 'application/json',
-        },
-      };
-
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const errorBody = await res.json().catch(() => ({}));
-        const message = errorBody?.error?.message || `APIエラー (${res.status} ${res.statusText})`;
-        throw new Error(message);
-      }
-
-      const resData = await res.json();
-      const text = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) {
-        throw new Error('Gemini APIからの応答が空でした。');
-      }
-
-      return parseAndSanitizeResult(text, originalTerms);
-    } catch (err: unknown) {
-      lastErr = err as Error;
-    }
-  }
-
-  throw lastErr || new Error(`モデル ${modelName} の判定に失敗しました。`);
 }
 
 function parseAndSanitizeResult(jsonText: string, originalTerms: string[]): SentenceCheckResult {

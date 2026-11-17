@@ -1,12 +1,7 @@
-import { GoogleGenAI } from '@google/genai';
+import { callGemini } from './aiRouter';
 import type { VocabAnalysisResult } from '../types/vocab';
 
-// 最新推奨モデル: gemini-3.6-flash
-const PRIMARY_MODEL = 'gemini-3.6-flash';
-const FALLBACK_MODELS = [
-  'gemini-3.6-flash',
-  'gemini-3.5-flash',
-];
+// 使うモデルは aiRouter の用途別設定(単語バッチ)で決まる
 const BATCH_CHUNK_SIZE = 15; // 1回あたりの最大安全チャンク数
 
 /**
@@ -63,7 +58,7 @@ export async function analyzeVocabularyBatch(
 }
 
 /**
- * 1チャンク分のバッチ解析（SDK試行 ➔ RESTフォールバック）
+ * 1チャンク分のバッチ解析(aiRouter経由。モデルの切り替えは aiRouter が行う)
  */
 async function processBatchChunk(
   items: string[],
@@ -105,98 +100,29 @@ Maintain the order of the inputs.`;
   const formattedInputs = items.map((item, idx) => `${idx + 1}. ${item}`).join('\n');
   const prompt = `Please analyze the following ${items.length} inputs:\n"""\n${formattedInputs}\n"""`;
 
+  // 共通のAI呼び出し基盤(aiRouter)で、用途「単語バッチ」のモデル順に試す。
+  // 上限の多い軽量モデルが先 → 枠切れ(429)・混雑(503)・エラーのときは次のモデルへ(設定画面のAI設定で変更可)
   let lastError: Error | null = null;
-
-  // 1. GoogleGenAI SDK で試行
-  try {
-    const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
-    const response = await ai.models.generateContent({
-      model: PRIMARY_MODEL,
-      contents: prompt,
-      config: {
-        systemInstruction,
-        responseMimeType: 'application/json',
-      },
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await callGemini({
+      purpose: 'vocabBatch',
+      parts: [{ text: prompt }],
+      system: systemInstruction,
+      json: true,
+      apiKey,
+      timeoutMs: 90_000,
     });
-
-    const text = response.text?.trim();
-    if (text) {
-      return parseAndSanitizeBatchResult(text, items, preferredLanguage);
-    }
-  } catch (err: unknown) {
-    console.warn(`Batch SDK call failed with ${PRIMARY_MODEL}, trying fallback REST models...`, err);
-    lastError = err as Error;
-  }
-
-  // 2. REST API フォールバック（各モデル順次試行）
-  for (const model of FALLBACK_MODELS) {
     try {
-      return await processBatchChunkRest(prompt, apiKey, preferredLanguage, systemInstruction, model, items);
+      const results = parseAndSanitizeBatchResult(res.text, items, preferredLanguage);
+      // 件数が合わないときは、1回だけやり直す(結果と入力の対応がずれるのを防ぐ)
+      if (results.length === items.length || attempt === 1) return results;
+      lastError = new Error('解析結果の件数が入力と一致しませんでした。');
     } catch (err: unknown) {
-      console.warn(`Model ${model} failed in batch, trying next...`, err);
-      if (!lastError) {
-        lastError = err as Error;
-      }
+      lastError = err as Error;
+      if (attempt === 1) break;
     }
   }
-
   throw lastError || new Error('Gemini APIとの通信に失敗しました。');
-}
-
-async function processBatchChunkRest(
-  prompt: string,
-  apiKey: string,
-  preferredLanguage: 'auto' | 'en' | 'pt',
-  systemInstruction: string,
-  modelName: string,
-  originalItems: string[]
-): Promise<VocabAnalysisResult[]> {
-  const versions = ['v1beta', 'v1'];
-  let lastErr: Error | null = null;
-
-  for (const ver of versions) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/${ver}/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
-      
-      const payload = {
-        contents: [
-          {
-            parts: [{ text: prompt }]
-          }
-        ],
-        systemInstruction: {
-          parts: [{ text: systemInstruction }]
-        },
-        generationConfig: {
-          responseMimeType: 'application/json',
-        }
-      };
-
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        const errorBody = await res.json().catch(() => ({}));
-        const message = errorBody?.error?.message || `APIエラー (${res.status} ${res.statusText})`;
-        throw new Error(message);
-      }
-
-      const resData = await res.json();
-      const text = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) {
-        throw new Error('Gemini API からの応答が空でした。');
-      }
-
-      return parseAndSanitizeBatchResult(text, originalItems, preferredLanguage);
-    } catch (e: unknown) {
-      lastErr = e as Error;
-    }
-  }
-
-  throw lastErr || new Error(`モデル ${modelName} の呼び出しに失敗しました。`);
 }
 
 function parseAndSanitizeBatchResult(
