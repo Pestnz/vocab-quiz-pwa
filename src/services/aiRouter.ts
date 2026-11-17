@@ -9,7 +9,7 @@ import { getStoredSettings } from './storage';
  * - APIキーは URL に載せず、ヘッダー(x-goog-api-key)で送る。ログ・エラー文に出さない
  */
 
-export type AiPurpose = 'translate' | 'diary' | 'score' | 'vocabBatch' | 'ocr';
+export type AiPurpose = 'translate' | 'diary' | 'score' | 'vocabBatch' | 'ocr' | 'teachQuestion' | 'teachEvaluate';
 
 export const AI_PURPOSE_LABEL: Record<AiPurpose, string> = {
   translate: '全訳・品詞分解・解答解説',
@@ -17,6 +17,8 @@ export const AI_PURPOSE_LABEL: Record<AiPurpose, string> = {
   score: '一文作成の採点',
   vocabBatch: '単語バッチ登録',
   ocr: 'OCR・正答表の読み取り',
+  teachQuestion: '質問応対練習: 出題',
+  teachEvaluate: '質問応対練習: 回答の判定',
 };
 
 export interface AiConfig {
@@ -38,6 +40,9 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
     score: LITE_ROUTE,
     vocabBatch: LITE_ROUTE,
     ocr: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'],
+    teachQuestion: LITE_ROUTE,
+    // 判定は内容の正しさが大事なので Flash を先に。混雑(503)が続くときでも止まらないよう、最後に Lite を置く
+    teachEvaluate: [...FLASH_ROUTE, 'gemini-3.5-flash-lite'],
   },
   limits: {
     'gemini-3.6-flash': 20,

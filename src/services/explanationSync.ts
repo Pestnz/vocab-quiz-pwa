@@ -54,14 +54,14 @@ export function isSyncConfigured(settings: AppSettings = getStoredSettings()): b
 
 // ---------------- GitHub Contents API ----------------
 
-class ShaMismatchError extends Error {}
+export class ShaMismatchError extends Error {}
 
-interface RemoteFile<T> {
+export interface RemoteFile<T> {
   sha: string;
   json: T;
 }
 
-function headers(token: string): HeadersInit {
+export function headers(token: string): HeadersInit {
   return {
     Authorization: `Bearer ${token.trim()}`,
     Accept: 'application/vnd.github.v3+json',
@@ -70,23 +70,23 @@ function headers(token: string): HeadersInit {
   };
 }
 
-function contentsUrl(s: AppSettings, path: string): string {
+export function contentsUrl(s: AppSettings, path: string): string {
   return `https://api.github.com/repos/${encodeURIComponent(s.repoOwner.trim())}/${encodeURIComponent(
     s.repoName.trim()
   )}/contents/${path}`;
 }
 
-function branchOf(s: AppSettings): string {
+export function branchOf(s: AppSettings): string {
   return s.branch?.trim() || 'main';
 }
 
-async function errorMessage(res: Response): Promise<string> {
+export async function errorMessage(res: Response): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { message?: string };
   return body.message || `GitHubエラー (${res.status} ${res.statusText})`;
 }
 
 /** 404 のときは null。1MB超などで中身が取れないときは、空とみなさずエラーにする */
-async function getJson<T>(s: AppSettings, path: string): Promise<RemoteFile<T> | null> {
+export async function getJson<T>(s: AppSettings, path: string): Promise<RemoteFile<T> | null> {
   const url = `${contentsUrl(s, path)}?ref=${encodeURIComponent(branchOf(s))}&_t=${Date.now()}`;
   const res = await fetch(url, { method: 'GET', headers: headers(s.githubToken), cache: 'no-store' });
   if (res.status === 404) return null;
@@ -105,7 +105,7 @@ function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
-async function putJson(s: AppSettings, path: string, obj: unknown, sha: string | null, message: string): Promise<string> {
+export async function putJson(s: AppSettings, path: string, obj: unknown, sha: string | null, message: string): Promise<string> {
   const text = JSON.stringify(obj);
   if (byteLength(text) > MAX_BYTES) {
     throw new Error(`${path} は1MBを超えるため、GitHubに送れません。画像を減らすか、分割してください。`);

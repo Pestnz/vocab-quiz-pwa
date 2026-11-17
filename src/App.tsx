@@ -44,6 +44,7 @@ import { isDuplicateVocab } from './services/vocabUtils';
 
 // 解説ワークベンチ(PDF.js / TipTap を含むため、開いたときだけ読み込む)
 const ExplainView = lazy(() => import('./components/Explain/ExplainView'));
+const TeachingPractice = lazy(() => import('./components/Teaching/TeachingPractice'));
 
 const PAGE_SIZE = 20;
 
@@ -888,6 +889,10 @@ export const App: React.FC = () => {
         ) : currentView === 'explain' ? (
           <Suspense fallback={<div className="p-6 text-sm text-slate-400">解説ワークベンチを読み込み中…</div>}>
             <ExplainView />
+          </Suspense>
+        ) : currentView === 'teach' ? (
+          <Suspense fallback={<div className="p-6 text-sm text-slate-400">質問応対練習を読み込み中…</div>}>
+            <TeachingPractice />
           </Suspense>
         ) : (
           <FlashcardQuiz
